@@ -8,4 +8,4 @@ services:
       - key: PORT
         value: 3005
       - key: OPENAI_API_KEY
-        sync: false 
+        sync: false
