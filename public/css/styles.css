@@ -153,13 +153,12 @@ input:focus, select:focus {
     box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.15);
 }
 
-/* Modern button styles with distinct colors */
 .btn-primary {
-    background-color: #4361ee;
+    background-color: var(--primary-color);
     color: white;
     border: none;
     padding: 0.85rem 1.75rem;
-    border-radius: 12px;
+    border-radius: 20px;
     cursor: pointer;
     font-size: 1rem;
     font-weight: 500;
@@ -168,21 +167,20 @@ input:focus, select:focus {
     align-items: center;
     justify-content: center;
     text-align: center;
-    box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);
 }
 
 .btn-primary:hover {
-    background-color: #3a56d4;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 15px rgba(67, 97, 238, 0.4);
+    background-color: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 113, 227, 0.2);
 }
 
 .btn-secondary {
-    background-color: #f5f5f7;
-    color: #444;
+    background-color: var(--light-color);
+    color: var(--dark-color);
     border: none;
     padding: 0.85rem 1.75rem;
-    border-radius: 12px;
+    border-radius: 20px;
     cursor: pointer;
     font-size: 1rem;
     font-weight: 500;
@@ -191,79 +189,33 @@ input:focus, select:focus {
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
 .btn-secondary:hover {
-    background-color: #e8e8eb;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    background-color: rgba(90, 142, 222, 0.2);
+    transform: translateY(-1px);
 }
 
 .btn-danger {
-    background-color: #ff4757;
-    color: white;
+    background-color: rgba(255, 59, 48, 0.1);
+    color: var(--danger-color);
     border: none;
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 0.85rem 1.5rem;
     font-size: 1rem;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.3s;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    box-shadow: 0 4px 10px rgba(255, 71, 87, 0.3);
 }
 
 .btn-danger:hover {
-    background-color: #e84152;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 15px rgba(255, 71, 87, 0.4);
-}
-
-/* Custom styles for specific action buttons */
-#add-expense-btn {
-    background-color: #4361ee;
-    box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);
-}
-
-#add-expense-btn:hover {
-    background-color: #3a56d4;
-    box-shadow: 0 6px 15px rgba(67, 97, 238, 0.4);
-}
-
-#export-excel-btn {
-    background-color: #10b981;
-    color: white;
-    box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
-}
-
-#export-excel-btn:hover {
-    background-color: #0ea371;
-    box-shadow: 0 6px 15px rgba(16, 185, 129, 0.4);
-}
-
-#export-pdf-btn {
-    background-color: #f97316;
-    color: white;
-    box-shadow: 0 4px 10px rgba(249, 115, 22, 0.3);
-}
-
-#export-pdf-btn:hover {
-    background-color: #ea680b;
-    box-shadow: 0 6px 15px rgba(249, 115, 22, 0.4);
-}
-
-#reset-all-btn {
-    background-color: #ef4444;
-    box-shadow: 0 4px 10px rgba(239, 68, 68, 0.3);
-}
-
-#reset-all-btn:hover {
-    background-color: #dc2626;
-    box-shadow: 0 6px 15px rgba(239, 68, 68, 0.4);
+    background-color: rgba(255, 59, 48, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.2);
 }
 
 /* Apple-style buttons */
@@ -1722,14 +1674,14 @@ header.minimal-header {
     transition: all 0.3s ease;
     position: relative;
     border: 1px solid rgba(0, 0, 0, 0.08);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
-    margin-bottom: 1.0rem;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+    margin-bottom: 1.5rem;
     background-color: white;
     padding: 0;
 }
 
 .upload-container:hover {
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
 .upload-area {
@@ -1737,14 +1689,14 @@ header.minimal-header {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 1.0rem 1.0rem 1rem;
+    padding: 2rem 1.5rem;
     border: 2px dashed rgba(0, 113, 227, 0.2);
     cursor: pointer;
     background-color: white;
     transition: all 0.3s ease;
     text-align: center;
     width: 100%;
-    min-height: 160px;
+    min-height: 180px;
     margin: 0;
     position: relative;
 }
@@ -1793,7 +1745,7 @@ header.minimal-header {
     margin: 0;
     font-weight: 400;
     letter-spacing: -0.01em;
-    line-height: 1.3;
+    line-height: 1.4;
 }
 
 .file-input {
@@ -1875,7 +1827,7 @@ header.minimal-header {
     justify-content: center;
     width: 100%;
     max-width: 400px;
-    gap: 0.6rem;
+    gap: 1rem;
 }
 
 .upload-text {
@@ -1883,7 +1835,7 @@ header.minimal-header {
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.5rem;
     align-items: center;
     justify-content: center;
 } 
