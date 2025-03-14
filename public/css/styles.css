@@ -1221,4 +1221,14 @@ header.minimal-header {
 .brand.false-click {
     text-decoration: none;
     display: block;
+}
+
+#calculated-amount {
+    margin-top: 5px;
+    padding: 8px;
+    background-color: #e8f5e9;
+    border-radius: 4px;
+    color: #2e7d32;
+    font-weight: bold;
+    font-size: 0.9em;
 } 

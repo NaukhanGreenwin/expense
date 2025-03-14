@@ -1138,4 +1138,63 @@ async function handleFileUpload(event) {
         console.error('Error:', error);
         alert('Error uploading files');
     }
-} 
+}
+
+// Add mileage handling
+function handleGLCodeChange(event) {
+    const glCode = event.target.value;
+    const amountLabel = document.querySelector('label[for="amount"]');
+    const amountInput = document.getElementById('amount');
+    const taxContainer = document.querySelector('.tax-container');
+    const descriptionLabel = document.querySelector('label[for="description"]');
+    
+    if (glCode === '6026-000') {
+        // Mileage entry mode
+        amountLabel.textContent = 'Kilometers';
+        amountInput.placeholder = 'Enter number of kilometers';
+        taxContainer.style.display = 'none';
+        descriptionLabel.textContent = 'From - To';
+        
+        // Add event listener for km calculation
+        amountInput.addEventListener('input', calculateMileageAmount);
+    } else {
+        // Regular expense mode
+        amountLabel.textContent = 'Amount ($)';
+        amountInput.placeholder = 'Enter amount';
+        taxContainer.style.display = 'block';
+        descriptionLabel.textContent = 'Description';
+        
+        // Remove mileage calculation listener
+        amountInput.removeEventListener('input', calculateMileageAmount);
+    }
+}
+
+function calculateMileageAmount(event) {
+    const kilometers = parseFloat(event.target.value) || 0;
+    const ratePerKm = 0.72;
+    const calculatedAmount = (kilometers * ratePerKm).toFixed(2);
+    
+    // Show calculated amount below the input
+    let calculatedDiv = document.getElementById('calculated-amount');
+    if (!calculatedDiv) {
+        calculatedDiv = document.createElement('div');
+        calculatedDiv.id = 'calculated-amount';
+        event.target.parentNode.appendChild(calculatedDiv);
+    }
+    calculatedDiv.textContent = `Amount to be reimbursed: $${calculatedAmount}`;
+    
+    // Update hidden amount field for form submission
+    const hiddenAmount = document.createElement('input');
+    hiddenAmount.type = 'hidden';
+    hiddenAmount.name = 'actualAmount';
+    hiddenAmount.value = calculatedAmount;
+    event.target.parentNode.appendChild(hiddenAmount);
+}
+
+// Add event listener to G/L code dropdown
+document.addEventListener('DOMContentLoaded', function() {
+    const glCodeDropdown = document.querySelector('select[name="glCode"]');
+    if (glCodeDropdown) {
+        glCodeDropdown.addEventListener('change', handleGLCodeChange);
+    }
+}); 
