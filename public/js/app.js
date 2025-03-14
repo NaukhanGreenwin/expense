@@ -110,6 +110,7 @@ function createEditModal() {
                             <option value="6012-000">6012-000 (Travel)</option>
                             <option value="other">Other</option>
                         </select>
+                        <input type="text" id="edit-custom-gl-code" placeholder="Enter custom G/L code" style="display: none; margin-top: 8px;">
                     </div>
                 </div>
                 <div class="form-group">
@@ -147,6 +148,20 @@ function createEditModal() {
         });
     }
     
+    // Show/hide custom G/L code input when "Other" is selected
+    const glCodeSelect = document.getElementById('edit-gl-code');
+    const customGlCodeInput = document.getElementById('edit-custom-gl-code');
+    
+    glCodeSelect.addEventListener('change', function() {
+        if (this.value === 'other') {
+            customGlCodeInput.style.display = 'block';
+            customGlCodeInput.required = true;
+        } else {
+            customGlCodeInput.style.display = 'none';
+            customGlCodeInput.required = false;
+        }
+    });
+    
     // Close modal when clicking outside
     window.addEventListener('click', function(event) {
         if (event.target === modal) {
@@ -165,7 +180,26 @@ function openEditModal(expense) {
     document.getElementById('edit-amount').value = expense.amount || 0;
     document.getElementById('edit-tax').value = expense.tax || calculateTax(expense.amount);
     document.getElementById('edit-date').value = expense.date || '';
-    document.getElementById('edit-gl-code').value = expense.glCode || '6408-000';
+    
+    const glCodeSelect = document.getElementById('edit-gl-code');
+    const customGlCodeInput = document.getElementById('edit-custom-gl-code');
+    
+    // Check if the G/L code is one of the predefined options
+    const predefinedCodes = ['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'];
+    const glCode = expense.glCode || '6408-000';
+    
+    if (predefinedCodes.includes(glCode)) {
+        glCodeSelect.value = glCode;
+        customGlCodeInput.style.display = 'none';
+        customGlCodeInput.required = false;
+    } else {
+        // If it's a custom code, select "Other" and show the custom input
+        glCodeSelect.value = 'other';
+        customGlCodeInput.value = glCode;
+        customGlCodeInput.style.display = 'block';
+        customGlCodeInput.required = true;
+    }
+    
     document.getElementById('edit-description').value = expense.description || '';
     
     const modal = document.getElementById('edit-expense-modal');
@@ -188,6 +222,17 @@ async function saveEditedExpense(event) {
     }
     
     // Get form values
+    const glCodeSelect = document.getElementById('edit-gl-code');
+    let glCode = glCodeSelect.value;
+    
+    // If "Other" is selected, use the custom G/L code
+    if (glCode === 'other') {
+        const customGlCode = document.getElementById('edit-custom-gl-code').value.trim();
+        if (customGlCode) {
+            glCode = customGlCode;
+        }
+    }
+    
     const updatedExpense = {
         id: currentEditingExpense.id,
         title: document.getElementById('edit-title').value,
@@ -196,7 +241,7 @@ async function saveEditedExpense(event) {
         amount: parseFloat(document.getElementById('edit-amount').value),
         tax: parseFloat(document.getElementById('edit-tax').value),
         date: document.getElementById('edit-date').value,
-        glCode: document.getElementById('edit-gl-code').value,
+        glCode: glCode,
         description: document.getElementById('edit-description').value
     };
     
@@ -620,8 +665,9 @@ function renderExpenses() {
                 <option value="6010-000" ${expense.glCode === '6010-000' ? 'selected' : ''}>6010-000 (Food & Ent.)</option>
                 <option value="6011-000" ${expense.glCode === '6011-000' ? 'selected' : ''}>6011-000 (Social)</option>
                 <option value="6012-000" ${expense.glCode === '6012-000' ? 'selected' : ''}>6012-000 (Travel)</option>
-                <option value="other" ${expense.glCode === 'other' ? 'selected' : ''}>Other</option>
+                <option value="other" ${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? 'selected' : ''}>Other</option>
             </select>
+            <input type="text" class="custom-gl-input" data-id="${expense.id}" placeholder="Enter custom G/L code" value="${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? expense.glCode : ''}" style="display: ${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? 'block' : 'none'}; margin-top: 5px; width: 100%;">
         `;
         
         row.innerHTML = `
@@ -669,9 +715,40 @@ function renderExpenses() {
         
         // Add event listeners to the dropdowns
         const glCodeDropdownEl = row.querySelector('.gl-dropdown');
+        const customGlInputEl = row.querySelector('.custom-gl-input');
         
         glCodeDropdownEl.addEventListener('change', (e) => {
-            updateExpenseGLCode(expense.id, e.target.value);
+            const selectedValue = e.target.value;
+            
+            if (selectedValue === 'other') {
+                // Show the custom input field
+                customGlInputEl.style.display = 'block';
+                customGlInputEl.focus();
+            } else {
+                // Hide the custom input field and update the G/L code
+                customGlInputEl.style.display = 'none';
+                updateExpenseGLCode(expense.id, selectedValue);
+            }
+        });
+        
+        // Add event listener for the custom G/L code input
+        customGlInputEl.addEventListener('blur', (e) => {
+            const customValue = e.target.value.trim();
+            if (customValue) {
+                updateExpenseGLCode(expense.id, customValue);
+            }
+        });
+        
+        // Also handle Enter key press
+        customGlInputEl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const customValue = e.target.value.trim();
+                if (customValue) {
+                    updateExpenseGLCode(expense.id, customValue);
+                    e.target.blur();
+                }
+            }
         });
         
         expensesList.appendChild(row);

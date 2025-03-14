@@ -753,9 +753,26 @@ select.gl-dropdown {
 
 /* Specific styling for G/L code dropdown */
 .gl-dropdown {
-    min-width: 140px;
     width: 100%;
-    white-space: nowrap;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+}
+
+/* Custom G/L code input styling */
+.custom-gl-input {
+    width: 100%;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    margin-top: 5px;
+    font-size: 14px;
+}
+
+.custom-gl-input:focus {
+    border-color: var(--primary-color);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 128, 0, 0.1);
 }
 
 /* Ensure G/L code column has enough width */
