@@ -13,6 +13,7 @@ const { PDFDocument } = require('pdf-lib');
 const dayjs = require('dayjs');
 const { v4: uuidv4 } = require('uuid');
 const archiver = require('archiver');
+const cors = require('cors'); // Add CORS middleware
 const sessions = new Map(); // Store session data
 
 // Expenses data store - in-memory for demo purposes
@@ -56,6 +57,9 @@ const openai = new OpenAI({
 
 const app = express();
 const PORT = 3005;
+
+// Enable CORS for all routes
+app.use(cors());
 
 // Middleware
 app.use(bodyParser.json());

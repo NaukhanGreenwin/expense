@@ -38,69 +38,9 @@ function debounce(func, wait) {
     };
 }
 
-// Auto-reset function that runs on page load
-function autoResetOnLoad() {
-    try {
-        // 1. Clear expenses
-        expenses = [];
-        filteredExpenses = [];
-        renderExpenses();
-        updateTotalAmount();
-        
-        // 2. Clear signature
-        if (signatureCanvas && signatureCtx) {
-            clearSignature();
-            localStorage.removeItem('userSignature');
-            userSignature = null;
-            
-            // Reset signature UI
-            const drawPanel = document.getElementById('draw-signature-panel');
-            const drawTab = document.getElementById('draw-tab');
-            const uploadPanel = document.getElementById('upload-signature-panel');
-            const uploadTab = document.getElementById('upload-tab');
-            const currentContainer = document.getElementById('current-signature-container');
-            
-            if (drawPanel && uploadPanel && currentContainer) {
-                drawPanel.classList.add('active');
-                drawTab.classList.add('active');
-                uploadPanel.classList.remove('active');
-                uploadTab.classList.remove('active');
-                currentContainer.style.display = 'none';
-            }
-        }
-        
-        // 3. Reset form inputs
-        const nameInput = document.getElementById('user-name');
-        const departmentInput = document.getElementById('user-department');
-        const pdfFileInput = document.getElementById('pdf-file');
-        
-        if (nameInput) nameInput.value = '';
-        if (departmentInput) departmentInput.value = '';
-        if (pdfFileInput) pdfFileInput.value = '';
-        
-        // 4. Clear results container
-        const resultsContainer = document.getElementById('pdf-results-container');
-        if (resultsContainer) resultsContainer.innerHTML = '';
-        
-        // 5. Clear upload status
-        const uploadStatus = document.getElementById('pdf-upload-status');
-        if (uploadStatus) uploadStatus.innerHTML = '';
-        
-        // 6. Reset session ID
-        currentSessionId = null;
-        
-        console.log('Application automatically reset on page load');
-    } catch (error) {
-        console.error('Error auto-resetting application:', error);
-    }
-}
-
 function initApp() {
-    // Auto-reset on page load
-    autoResetOnLoad();
-    
-    // We don't need to fetch expenses since we're resetting on load
-    // fetchExpenses();
+    // Load expenses from the API
+    fetchExpenses();
     
     // Event listeners
     if (pdfUploadForm) {
@@ -1798,7 +1738,9 @@ async function handleEmailExport() {
             },
             body: JSON.stringify({ 
                 expenses: dataToExport,
-                sessionId: currentSessionId 
+                userName: dataToExport[0]?.name || '',
+                userDepartment: dataToExport[0]?.department || '',
+                signatureData: userSignature
             })
         });
         
@@ -1813,15 +1755,19 @@ async function handleEmailExport() {
         }
         
         // Get file paths from the response
-        const { excelPath, pdfPath } = result;
+        const { excelPath, pdfPath, zipPath } = result;
         
         // Get full URLs for the files
         const fileUrls = [];
-        if (excelPath) {
-            fileUrls.push(`${window.location.origin}${excelPath}`);
-        }
-        if (pdfPath) {
-            fileUrls.push(`${window.location.origin}${pdfPath}`);
+        if (zipPath) {
+            fileUrls.push(`${window.location.origin}/uploads/${result.exportId}/${path.basename(zipPath)}`);
+        } else {
+            if (excelPath) {
+                fileUrls.push(`${window.location.origin}/uploads/${result.exportId}/${path.basename(excelPath)}`);
+            }
+            if (pdfPath) {
+                fileUrls.push(`${window.location.origin}/uploads/${result.exportId}/${path.basename(pdfPath)}`);
+            }
         }
         
         // Hide loading indicator
@@ -1867,7 +1813,6 @@ async function handleEmailExport() {
     }
 }
 
-// Function to provide a fallback method when Outlook can't be opened
 function offerFallbackMethod(fileUrls, subject, body) {
     // Create a modal or notification to inform the user
     const fallbackModal = document.createElement('div');
