@@ -320,6 +320,21 @@ app.post('/api/export-excel', async (req, res) => {
     const worksheet = workbook.addWorksheet('Expense Report', {
       properties: {
         defaultRowHeight: 18
+      },
+      pageSetup: {
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0, // Setting to 0 means "automatically determine the number of pages"
+        paperSize: 9, // 9 = A4
+        orientation: 'portrait',
+        margins: {
+          left: 0.7,
+          right: 0.7,
+          top: 0.75,
+          bottom: 0.75,
+          header: 0.3,
+          footer: 0.3
+        }
       }
     });
     
@@ -1436,6 +1451,21 @@ app.post('/api/export-email', async (req, res) => {
     const worksheet = workbook.addWorksheet('Expense Report', {
       properties: {
         defaultRowHeight: 18
+      },
+      pageSetup: {
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0, // Setting to 0 means "automatically determine the number of pages"
+        paperSize: 9, // 9 = A4
+        orientation: 'portrait',
+        margins: {
+          left: 0.7,
+          right: 0.7,
+          top: 0.75,
+          bottom: 0.75,
+          header: 0.3,
+          footer: 0.3
+        }
       }
     });
     
