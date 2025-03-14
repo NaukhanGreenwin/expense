@@ -135,6 +135,12 @@ function initApp() {
         addExpenseButton.addEventListener('click', openAddExpenseForm);
     }
     
+    // Add event listener for Travel Expense button
+    const travelExpenseButton = document.getElementById('travel-expense-btn');
+    if (travelExpenseButton) {
+        travelExpenseButton.addEventListener('click', openTravelExpenseForm);
+    }
+    
     // Hide the expense form - we only use PDF upload now
     const expenseFormContainer = document.getElementById('expense-form-container');
     if (expenseFormContainer) {
@@ -188,6 +194,83 @@ function openAddExpenseForm() {
     const modalTitle = document.querySelector('#edit-expense-modal h3');
     if (modalTitle) {
         modalTitle.textContent = 'Add New Expense';
+    }
+}
+
+// Function to open the travel expense form
+function openTravelExpenseForm() {
+    // Create a blank travel expense object with default G/L code for mileage
+    const newTravelExpense = {
+        id: 'new', // This will be replaced with a real ID when saved
+        title: 'Travel Expense',
+        name: '',
+        department: '',
+        amount: '', // Will be calculated based on kilometers
+        tax: '0', // No tax for mileage
+        date: new Date().toISOString().split('T')[0], // Today's date
+        glCode: '6026-000', // G/L code for mileage
+        description: '',
+        fromLocation: '',
+        toLocation: '',
+        kilometers: ''
+    };
+    
+    // Open the edit modal with the blank travel expense
+    openEditModal(newTravelExpense);
+    
+    // Change the modal title to indicate we're adding a new travel expense
+    const modalTitle = document.querySelector('#edit-expense-modal h3');
+    if (modalTitle) {
+        modalTitle.textContent = 'Add Travel Expense';
+    }
+    
+    // Hide the Merchant/Title field as it's not needed for travel expenses
+    const titleInput = document.getElementById('edit-title');
+    if (titleInput) {
+        const titleGroup = titleInput.closest('.form-group');
+        if (titleGroup) {
+            titleGroup.style.display = 'none';
+        }
+    }
+    
+    // Hide the Name and Department fields
+    const nameInput = document.getElementById('edit-name');
+    const departmentInput = document.getElementById('edit-department');
+    
+    if (nameInput) {
+        const nameGroup = nameInput.closest('.form-group');
+        if (nameGroup) {
+            nameGroup.style.display = 'none';
+        }
+    }
+    
+    if (departmentInput) {
+        const departmentGroup = departmentInput.closest('.form-group');
+        if (departmentGroup) {
+            departmentGroup.style.display = 'none';
+        }
+    }
+    
+    // Ensure the mileage fields are shown and focus on the kilometers field
+    const glCodeSelect = document.getElementById('edit-gl-code');
+    if (glCodeSelect) {
+        glCodeSelect.value = '6026-000';
+        
+        // Trigger the change event to show mileage fields
+        const event = new Event('change');
+        glCodeSelect.dispatchEvent(event);
+        
+        // Update labels to make it clear this is for kilometers
+        const amountLabel = document.getElementById('amount-label');
+        if (amountLabel) {
+            amountLabel.textContent = 'Kilometers';
+        }
+        
+        // Focus on the kilometers field
+        const kilometersInput = document.getElementById('edit-amount');
+        if (kilometersInput) {
+            kilometersInput.focus();
+        }
     }
 }
 
