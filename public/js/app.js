@@ -14,11 +14,29 @@ let filteredExpenses = [];
 let currentEditingExpense = null;
 let currentSessionId = null;
 
+// --- Signature Functionality ---
+let signatureCanvas, signatureCtx, isDrawing = false;
+let userSignature = null; // Store the user's signature as a base64 string
+
 // Initialize the app
-document.addEventListener('DOMContentLoaded', initApp);
+document.addEventListener('DOMContentLoaded', function() {
+    initApp();
+    initSignature(); // Initialize signature functionality
+});
 
 // Constants
 const HST_RATE = 0.13; // 13% HST tax rate
+
+// Utility function for debouncing resize events
+function debounce(func, wait) {
+    let timeout;
+    return function() {
+        const context = this;
+        const args = arguments;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+}
 
 function initApp() {
     // Load expenses from the API
@@ -45,6 +63,18 @@ function initApp() {
         exportPdfButton.addEventListener('click', handlePdfExport);
     }
     
+    // Add event listener for Reset All button
+    const resetAllButton = document.getElementById('reset-all-btn');
+    if (resetAllButton) {
+        resetAllButton.addEventListener('click', resetAllData);
+    }
+
+    // Add event listener for Add Expense button
+    const addExpenseButton = document.getElementById('add-expense-btn');
+    if (addExpenseButton) {
+        addExpenseButton.addEventListener('click', openAddExpenseForm);
+    }
+    
     // Hide the expense form - we only use PDF upload now
     const expenseFormContainer = document.getElementById('expense-form-container');
     if (expenseFormContainer) {
@@ -53,6 +83,52 @@ function initApp() {
     
     // Create edit modal if it doesn't exist
     createEditModal();
+
+    // Add PDF file count validation
+    const pdfFileInput = document.getElementById('pdf-file');
+    
+    if (pdfFileInput) {
+        pdfFileInput.addEventListener('change', function() {
+            const maxFiles = 50;
+            
+            if (this.files.length > maxFiles) {
+                // Show error and clear the file input
+                showNotification(`You can only upload a maximum of ${maxFiles} PDF files at once.`, 'error');
+                this.value = ''; // Clear the file input
+                return;
+            }
+            
+            // Show selected file count
+            if (this.files.length > 0) {
+                showNotification(`${this.files.length} file${this.files.length > 1 ? 's' : ''} selected`, 'info', 2000);
+            }
+        });
+    }
+}
+
+// Function to open the add expense form
+function openAddExpenseForm() {
+    // Create a blank expense object
+    const newExpense = {
+        id: 'new', // This will be replaced with a real ID when saved
+        title: '',
+        name: '',
+        department: '',
+        amount: '',
+        tax: '',
+        date: new Date().toISOString().split('T')[0], // Today's date
+        glCode: '6408-000', // Default G/L code
+        description: ''
+    };
+    
+    // Open the edit modal with the blank expense
+    openEditModal(newExpense);
+    
+    // Change the modal title to indicate we're adding a new expense
+    const modalTitle = document.querySelector('#edit-expense-modal h3');
+    if (modalTitle) {
+        modalTitle.textContent = 'Add New Expense';
+    }
 }
 
 // Create the edit modal structure
@@ -84,10 +160,11 @@ function createEditModal() {
                 </div>
                 <div class="form-row">
                     <div class="form-group half">
-                        <label for="edit-amount">Amount ($)</label>
+                        <label for="edit-amount" id="amount-label">Amount ($)</label>
                         <input type="number" id="edit-amount" step="0.01" min="0" required>
+                        <div id="calculated-amount" style="display: none; margin-top: 5px; padding: 5px; background-color: #e8f5e9; color: #2e7d32; border-radius: 4px; font-size: 14px;"></div>
                     </div>
-                    <div class="form-group half">
+                    <div class="form-group half" id="tax-group">
                         <label for="edit-tax">Tax (13% HST)</label>
                         <input type="number" id="edit-tax" step="0.01" min="0" required>
                     </div>
@@ -113,7 +190,33 @@ function createEditModal() {
                         <input type="text" id="edit-custom-gl-code" placeholder="Enter custom G/L code" style="display: none; margin-top: 8px;">
                     </div>
                 </div>
-                <div class="form-group">
+                
+                <!-- Mileage specific fields - hidden by default -->
+                <div id="mileage-fields" style="display: none; margin-top: 10px; padding: 10px; background-color: #f5f5f5; border-radius: 4px;">
+                    <h4 style="margin-top: 0; color: #2e7d32;">Mileage Details</h4>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label for="edit-from-location">From</label>
+                            <input type="text" id="edit-from-location" placeholder="Starting location">
+                        </div>
+                        <div class="form-group half">
+                            <label for="edit-to-location">To</label>
+                            <input type="text" id="edit-to-location" placeholder="Destination">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-trip-purpose">Trip Purpose</label>
+                        <select id="edit-trip-purpose">
+                            <option value="client-meeting">Client Meeting</option>
+                            <option value="site-visit">Site Visit</option>
+                            <option value="training">Training/Education</option>
+                            <option value="office-travel">Office Travel</option>
+                            <option value="other-purpose">Other</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group" id="description-group">
                     <label for="edit-description">Description</label>
                     <textarea id="edit-description" rows="3"></textarea>
                 </div>
@@ -140,10 +243,28 @@ function createEditModal() {
     const amountInput = document.getElementById('edit-amount');
     if (amountInput) {
         amountInput.addEventListener('input', function() {
-            const amount = parseFloat(this.value) || 0;
-            const taxInput = document.getElementById('edit-tax');
-            if (taxInput) {
-                taxInput.value = calculateTax(amount).toFixed(2);
+            const glCode = document.getElementById('edit-gl-code').value;
+            
+            if (glCode === '6026-000') {
+                // For mileage, calculate reimbursement
+                const kilometers = parseFloat(this.value) || 0;
+                const reimbursementAmount = calculateMileageReimbursement(kilometers);
+                
+                // Show calculated amount
+                const calculatedAmountDiv = document.getElementById('calculated-amount');
+                calculatedAmountDiv.style.display = 'block';
+                calculatedAmountDiv.textContent = `Reimbursement: $${reimbursementAmount.toFixed(2)} (${kilometers} km × $0.72)`;
+            } else {
+                // For regular expenses, calculate tax
+                const amount = parseFloat(this.value) || 0;
+                const taxInput = document.getElementById('edit-tax');
+                if (taxInput) {
+                    taxInput.value = calculateTax(amount).toFixed(2);
+                }
+                
+                // Hide calculated amount
+                const calculatedAmountDiv = document.getElementById('calculated-amount');
+                calculatedAmountDiv.style.display = 'none';
             }
         });
     }
@@ -160,6 +281,9 @@ function createEditModal() {
             customGlCodeInput.style.display = 'none';
             customGlCodeInput.required = false;
         }
+        
+        // Toggle mileage fields when G/L code changes
+        toggleMileageFields(this.value === '6026-000');
     });
     
     // Close modal when clicking outside
@@ -202,15 +326,88 @@ function openEditModal(expense) {
     
     document.getElementById('edit-description').value = expense.description || '';
     
+    // Check for mileage fields and populate them if this is a mileage entry
+    const fromLocationInput = document.getElementById('edit-from-location');
+    const toLocationInput = document.getElementById('edit-to-location');
+    const tripPurposeSelect = document.getElementById('edit-trip-purpose');
+    
+    if (fromLocationInput && toLocationInput && tripPurposeSelect) {
+        if (expense.glCode === '6026-000') {
+            fromLocationInput.value = expense.fromLocation || '';
+            toLocationInput.value = expense.toLocation || '';
+            tripPurposeSelect.value = expense.tripPurpose || 'client-meeting';
+            
+            // Parse from description if first time
+            if (!expense.fromLocation && !expense.toLocation && expense.description) {
+                const parts = expense.description.split(' - ');
+                if (parts.length >= 2) {
+                    fromLocationInput.value = parts[0] || '';
+                    toLocationInput.value = parts[1] || '';
+                }
+            }
+        }
+    }
+    
+    // Toggle the display of mileage specific fields
+    toggleMileageFields(glCode === '6026-000');
+    
     const modal = document.getElementById('edit-expense-modal');
     modal.style.display = 'block';
 }
 
-// Close edit modal
-function closeEditModal() {
-    const modal = document.getElementById('edit-expense-modal');
-    modal.style.display = 'none';
-    currentEditingExpense = null;
+// Toggle the display of mileage specific fields
+function toggleMileageFields(showMileageFields) {
+    const mileageFields = document.getElementById('mileage-fields');
+    const descriptionGroup = document.getElementById('description-group');
+    const amountLabel = document.getElementById('amount-label');
+    const taxGroup = document.getElementById('tax-group');
+    const calculatedAmount = document.getElementById('calculated-amount');
+    const amountInput = document.getElementById('edit-amount');
+    
+    if (showMileageFields) {
+        // Show mileage fields
+        mileageFields.style.display = 'block';
+        
+        // Change amount label to kilometers
+        amountLabel.textContent = 'Kilometers';
+        amountInput.placeholder = 'Enter kilometers driven';
+        
+        // Hide tax group as mileage has no tax
+        taxGroup.style.display = 'none';
+        
+        // Hide description as we're using from/to instead
+        descriptionGroup.style.display = 'none';
+        
+        // Show calculated amount if there's a value
+        const kilometers = parseFloat(amountInput.value) || 0;
+        if (kilometers > 0) {
+            const reimbursementAmount = calculateMileageReimbursement(kilometers);
+            calculatedAmount.style.display = 'block';
+            calculatedAmount.textContent = `Reimbursement: $${reimbursementAmount.toFixed(2)} (${kilometers} km × $0.72)`;
+        }
+    } else {
+        // Hide mileage fields
+        mileageFields.style.display = 'none';
+        
+        // Restore original labels and display
+        amountLabel.textContent = 'Amount ($)';
+        amountInput.placeholder = 'Enter amount';
+        
+        // Show tax group for regular expenses
+        taxGroup.style.display = 'block';
+        
+        // Show description for regular expenses
+        descriptionGroup.style.display = 'block';
+        
+        // Hide calculated amount
+        calculatedAmount.style.display = 'none';
+    }
+}
+
+// Calculate mileage reimbursement
+function calculateMileageReimbursement(kilometers) {
+    const MILEAGE_RATE = 0.72; // $0.72 per kilometer
+    return kilometers * MILEAGE_RATE;
 }
 
 // Save edited expense
@@ -233,8 +430,9 @@ async function saveEditedExpense(event) {
         }
     }
     
+    // Build the base expense object
     const updatedExpense = {
-        id: currentEditingExpense.id,
+        id: currentEditingExpense.id === 'new' ? Date.now() : currentEditingExpense.id, // Generate new ID if new expense
         title: document.getElementById('edit-title').value,
         name: document.getElementById('edit-name').value,
         department: document.getElementById('edit-department').value,
@@ -245,14 +443,51 @@ async function saveEditedExpense(event) {
         description: document.getElementById('edit-description').value
     };
     
+    // Handle mileage specific fields
+    if (glCode === '6026-000') {
+        const fromLocation = document.getElementById('edit-from-location').value;
+        const toLocation = document.getElementById('edit-to-location').value;
+        const tripPurpose = document.getElementById('edit-trip-purpose').value;
+        
+        // Add mileage specific fields
+        updatedExpense.fromLocation = fromLocation;
+        updatedExpense.toLocation = toLocation;
+        updatedExpense.tripPurpose = tripPurpose;
+        updatedExpense.kilometers = updatedExpense.amount; // Store original kilometers
+        
+        // Calculate the reimbursement amount
+        updatedExpense.amount = calculateMileageReimbursement(updatedExpense.kilometers);
+        
+        // Set tax to 0 for mileage expenses
+        updatedExpense.tax = 0;
+        
+        // Create a description from the mileage fields
+        updatedExpense.description = `${fromLocation} - ${toLocation} (${getTripPurposeText(tripPurpose)})`;
+    }
+    
     try {
         // Show loading overlay
         loadingOverlay.classList.add('active');
-        document.querySelector('.loading-overlay p').textContent = 'Saving expense...';
         
-        // Update expense on server
-        const response = await fetch(`/api/expenses/${updatedExpense.id}`, {
-            method: 'PUT',
+        let method, url, successMessage;
+        
+        if (currentEditingExpense.id === 'new') {
+            // It's a new expense
+            method = 'POST';
+            url = '/api/expenses';
+            successMessage = 'Expense added successfully';
+            document.querySelector('.loading-overlay p').textContent = 'Adding expense...';
+        } else {
+            // It's an existing expense
+            method = 'PUT';
+            url = `/api/expenses/${updatedExpense.id}`;
+            successMessage = 'Expense updated successfully';
+            document.querySelector('.loading-overlay p').textContent = 'Saving expense...';
+        }
+        
+        // Send request to server
+        const response = await fetch(url, {
+            method: method,
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -260,19 +495,33 @@ async function saveEditedExpense(event) {
         });
         
         if (!response.ok) {
-            throw new Error('Failed to update expense');
+            throw new Error(`Failed to ${currentEditingExpense.id === 'new' ? 'add' : 'update'} expense`);
+        }
+        
+        const savedExpense = await response.json();
+        
+        // Update the ID if it's a new expense
+        if (currentEditingExpense.id === 'new') {
+            updatedExpense.id = savedExpense.id;
         }
         
         // Update local state
-        const index = expenses.findIndex(e => e.id === updatedExpense.id);
-        if (index !== -1) {
-            expenses[index] = updatedExpense;
-        }
-        
-        // Update filtered expenses
-        const filteredIndex = filteredExpenses.findIndex(e => e.id === updatedExpense.id);
-        if (filteredIndex !== -1) {
-            filteredExpenses[filteredIndex] = updatedExpense;
+        if (currentEditingExpense.id === 'new') {
+            // Add to expenses array
+            expenses.push(updatedExpense);
+            filteredExpenses.push(updatedExpense);
+        } else {
+            // Update existing expense
+            const index = expenses.findIndex(e => e.id === updatedExpense.id);
+            if (index !== -1) {
+                expenses[index] = updatedExpense;
+            }
+            
+            // Update filtered expenses
+            const filteredIndex = filteredExpenses.findIndex(e => e.id === updatedExpense.id);
+            if (filteredIndex !== -1) {
+                filteredExpenses[filteredIndex] = updatedExpense;
+            }
         }
         
         // Re-render expenses list
@@ -286,13 +535,33 @@ async function saveEditedExpense(event) {
         closeEditModal();
         
         // Show success notification
-        showNotification('Expense updated successfully', 'success');
+        showNotification(successMessage, 'success');
         
     } catch (error) {
-        console.error('Error updating expense:', error);
+        console.error('Error saving expense:', error);
         loadingOverlay.classList.remove('active');
-        showNotification('Failed to update expense: ' + error.message, 'error');
+        showNotification('Failed to save expense: ' + error.message, 'error');
     }
+}
+
+// Get readable text for trip purpose value
+function getTripPurposeText(purposeValue) {
+    const purposeMap = {
+        'client-meeting': 'Client Meeting',
+        'site-visit': 'Site Visit',
+        'training': 'Training/Education',
+        'office-travel': 'Office Travel',
+        'other-purpose': 'Other'
+    };
+    
+    return purposeMap[purposeValue] || purposeValue;
+}
+
+// Close edit modal
+function closeEditModal() {
+    const modal = document.getElementById('edit-expense-modal');
+    modal.style.display = 'none';
+    currentEditingExpense = null;
 }
 
 // Calculate HST tax from amount
@@ -369,7 +638,30 @@ async function handlePdfUpload(event) {
     
     // Show loading overlay
     loadingOverlay.classList.add('active');
-    document.querySelector('.loading-overlay p').textContent = `Processing ${files.length} receipt${files.length > 1 ? 's' : ''}...`;
+    
+    // Office humor messages
+    const funnyMessages = [
+        "💼 Making your expenses look completely legitimate...",
+        "📝 Checking if that $500 'office supply' was really a PS5...",
+        "🏝️ Verifying that conference was not actually a vacation...",
+        "🧠 Remembering all those business discussions at the bar...",
+        "🧾 Convincing accounting this coffee was for a client meeting...",
+        "💸 Calculating how many pizza lunches until your bonus is gone...",
+        "🔍 Searching for receipts you swore were in your pocket...",
+        "🤔 Wondering if your boss will believe this was work-related...",
+        "💻 Converting lunch receipts into billable hours...",
+        "📊 Creating charts to justify that team-building happy hour..."
+    ];
+    
+    // Set initial message
+    let currentMessageIndex = 0;
+    document.querySelector('.loading-overlay p').textContent = funnyMessages[currentMessageIndex];
+    
+    // Setup message rotation interval
+    const messageInterval = setInterval(() => {
+        currentMessageIndex = (currentMessageIndex + 1) % funnyMessages.length;
+        document.querySelector('.loading-overlay p').textContent = funnyMessages[currentMessageIndex];
+    }, 4000); // Change message every 4 seconds
     
     // Create a FormData object
     const formData = new FormData();
@@ -390,6 +682,7 @@ async function handlePdfUpload(event) {
     
     if (validFilesCount === 0) {
         loadingOverlay.classList.remove('active');
+        clearInterval(messageInterval); // Clear the interval when closing overlay
         showNotification('No valid PDF files selected', 'error');
         return;
     }
@@ -428,12 +721,27 @@ async function handlePdfUpload(event) {
                     if (item && (item.data || item)) {
                         // Use a small delay between submissions to allow UI to update
                         setTimeout(() => {
-                            document.querySelector('.loading-overlay p').textContent = `Adding expense ${expensesAdded + 1} of ${result.results.length}...`;
+                            // Office humor messages for progress
+                            const progressMessages = [
+                                "🧾 Expense #[COUNT] - Preparing for accounting's approval...",
+                                "💸 Expense #[COUNT] - Converting receipts to money in your pocket...",
+                                "🔍 Expense #[COUNT] - Finding the best tax category for this one...",
+                                "📋 Expense #[COUNT] - Adding legitimate business purpose..."
+                            ];
+                            
+                            // Pick a random message and replace [COUNT] with the actual count
+                            let progressMessage = progressMessages[Math.floor(Math.random() * progressMessages.length)];
+                            progressMessage = progressMessage.replace('[COUNT]', expensesAdded + 1);
+                            
+                            document.querySelector('.loading-overlay p').textContent = progressMessage;
                             populateExpenseForm(item);
                             expensesAdded++;
                             
                             // Update UI when all done
                             if (expensesAdded === result.results.length) {
+                                // Clear the message rotation interval
+                                clearInterval(messageInterval);
+                                
                                 // Hide loading overlay
                                 loadingOverlay.classList.remove('active');
                                 
@@ -455,11 +763,17 @@ async function handlePdfUpload(event) {
                 }
             }
         } else {
+            // Clear the message rotation interval
+            clearInterval(messageInterval);
+            
             // Hide loading overlay
             loadingOverlay.classList.remove('active');
             showNotification('No data extracted from PDF', 'error');
         }
     } catch (error) {
+        // Clear the message rotation interval when error occurs
+        clearInterval(messageInterval);
+        
         console.error('Error processing PDFs:', error);
         loadingOverlay.classList.remove('active');
         showNotification(error.message || 'Failed to process PDFs', 'error');
@@ -797,8 +1111,40 @@ async function updateExpenseGLCode(expenseId, newGLCode) {
         const expense = expenses.find(exp => exp.id === expenseId);
         if (!expense) return;
         
+        // Store original values in case we need to show edit form
+        const originalExpense = {...expense};
+        
+        // Check if switching to mileage code
+        const isMileageCode = newGLCode === '6026-000';
+        
+        // If switching to mileage, open edit modal to get mileage details
+        if (isMileageCode) {
+            // Open the edit modal first to get mileage details
+            openEditModal(expense);
+            
+            // Pre-select the mileage code
+            const glCodeSelect = document.getElementById('edit-gl-code');
+            if (glCodeSelect) {
+                glCodeSelect.value = '6026-000';
+                // Trigger the change event manually to show mileage fields
+                glCodeSelect.dispatchEvent(new Event('change'));
+            }
+            
+            // Show a notification about entering mileage details
+            showNotification('Please enter mileage details', 'info');
+            return;
+        }
+        
         // Update local state first for immediate feedback
         expense.glCode = newGLCode;
+        
+        // If changing from mileage to normal expense, reset any mileage-specific fields
+        if (expense.kilometers) {
+            delete expense.kilometers;
+            delete expense.fromLocation;
+            delete expense.toLocation;
+            delete expense.tripPurpose;
+        }
         
         // Update the expense on the server
         const response = await fetch(`/api/expenses/${expenseId}`, {
@@ -825,10 +1171,28 @@ async function updateExpenseGLCode(expenseId, newGLCode) {
     }
 }
 
-// Update the total amount
+// Update the total amount display
 function updateTotalAmount() {
-    const total = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-    expensesTotal.textContent = `$${total.toFixed(2)}`;
+    if (!expensesTotal) return;
+    
+    // Calculate regular total
+    const total = filteredExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+    
+    // Calculate mileage totals
+    const mileageExpenses = filteredExpenses.filter(e => e.glCode === '6026-000');
+    const totalKilometers = mileageExpenses.reduce((sum, expense) => sum + (parseFloat(expense.kilometers) || 0), 0);
+    const totalMileageAmount = mileageExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+    
+    // Update the display
+    expensesTotal.innerHTML = `
+        <div>Total: <span class="total-amount">$${total.toFixed(2)}</span></div>
+        ${totalKilometers > 0 ? `
+        <div class="mileage-summary">
+            <div>Total Kilometers: <span class="km-amount">${totalKilometers.toFixed(1)} km</span></div>
+            <div>Total Mileage Reimbursement: <span class="mileage-amount">$${totalMileageAmount.toFixed(2)}</span></div>
+        </div>
+        ` : ''}
+    `;
 }
 
 // Show notification
@@ -909,13 +1273,26 @@ async function handleExcelExport() {
         // Get the currently filtered expenses or all expenses
         const dataToExport = filteredExpenses.length > 0 ? filteredExpenses : expenses;
         
+        // Include signature data if available
+        const exportData = {
+            expenses: dataToExport,
+            signature: userSignature || null
+        };
+        
+        // Debug logging for signature
+        console.log('Signature data present:', !!userSignature);
+        if (userSignature) {
+            console.log('Signature data length:', userSignature.length);
+            console.log('Signature data starts with:', userSignature.substring(0, 50) + '...');
+        }
+        
         // Send request to server
         const response = await fetch('/api/export-excel', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ expenses: dataToExport })
+            body: JSON.stringify(exportData)
         });
         
         // Hide loading indicator
@@ -1140,61 +1517,806 @@ async function handleFileUpload(event) {
     }
 }
 
-// Add mileage handling
-function handleGLCodeChange(event) {
-    const glCode = event.target.value;
-    const amountLabel = document.querySelector('label[for="amount"]');
+// Update the editExpense function to include mileage handling
+function editExpense(event) {
+    // Get the row element
+    const row = event.target.closest('tr');
+    if (!row) return;
+    
+    // Get the row data
+    const id = row.dataset.id;
+    const date = row.querySelector('td:nth-child(1)').textContent.trim();
+    const title = row.querySelector('td:nth-child(2) .title-text')?.textContent || '';
+    const description = row.querySelector('td:nth-child(2) .description-text')?.textContent || '';
+    const amount = row.querySelector('td:nth-child(3)').textContent.trim().replace('$', '');
+    const tax = row.querySelector('td:nth-child(4)').textContent.trim().replace('$', '');
+    const glCode = row.querySelector('td:nth-child(5) select')?.value || '';
+    
+    // Create modal with form
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Edit Expense</h2>
+            <form id="edit-expense-form">
+                <input type="hidden" name="id" value="${id}">
+                <div class="form-group">
+                    <label for="date">Date</label>
+                    <input type="date" id="date" name="date" value="${date}" required>
+                </div>
+                <div class="form-group">
+                    <label for="title">Merchant/Title</label>
+                    <input type="text" id="title" name="title" value="${title}" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <textarea id="description" name="description">${description}</textarea>
+                </div>
+                <div class="form-group">
+                    <label for="amount" id="amount-label">Amount ($)</label>
+                    <input type="number" id="amount" name="amount" step="0.01" value="${amount}" required>
+                    <div id="calculated-amount" style="display: none;"></div>
+                </div>
+                <div class="form-group" id="tax-group">
+                    <label for="tax">Tax (HST)</label>
+                    <input type="number" id="tax" name="tax" step="0.01" value="${tax}">
+                </div>
+                <div class="form-group">
+                    <label for="glCode">G/L Code</label>
+                    <select id="glCode" name="glCode" required>
+                        <option value="6026-000" ${glCode === '6026-000' ? 'selected' : ''}>6026-000 (Mileage/ETR)</option>
+                        <option value="6210-000" ${glCode === '6210-000' ? 'selected' : ''}>6210-000 (Computer Supplies)</option>
+                        <option value="6400-000" ${glCode === '6400-000' ? 'selected' : ''}>6400-000 (Small Tools)</option>
+                        <option value="6500-000" ${glCode === '6500-000' ? 'selected' : ''}>6500-000 (Office Supplies)</option>
+                        <option value="8200-000" ${glCode === '8200-000' ? 'selected' : ''}>8200-000 (Training & Development)</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    // Add modal to page
+    document.body.appendChild(modal);
+    
+    // Setup mileage mode
+    const glCodeSelect = document.getElementById('glCode');
+    const amountLabel = document.getElementById('amount-label');
     const amountInput = document.getElementById('amount');
-    const taxContainer = document.querySelector('.tax-container');
-    const descriptionLabel = document.querySelector('label[for="description"]');
+    const taxGroup = document.getElementById('tax-group');
+    const calculatedAmount = document.getElementById('calculated-amount');
     
-    if (glCode === '6026-000') {
-        // Mileage entry mode
-        amountLabel.textContent = 'Kilometers';
-        amountInput.placeholder = 'Enter number of kilometers';
-        taxContainer.style.display = 'none';
-        descriptionLabel.textContent = 'From - To';
+    function updateMileageMode() {
+        if (glCodeSelect.value === '6026-000') {
+            // Mileage mode
+            amountLabel.textContent = 'Kilometers';
+            amountInput.placeholder = 'Enter kilometers';
+            taxGroup.style.display = 'none';
+            calculatedAmount.style.display = 'block';
+            
+            // Calculate amount based on kilometers
+            const km = parseFloat(amountInput.value) || 0;
+            const amount = (km * 0.72).toFixed(2);
+            calculatedAmount.textContent = `Amount: $${amount}`;
+            calculatedAmount.style.color = '#2e7d32';
+            calculatedAmount.style.fontWeight = 'bold';
+            calculatedAmount.style.marginTop = '5px';
+        } else {
+            // Regular expense mode
+            amountLabel.textContent = 'Amount ($)';
+            amountInput.placeholder = 'Enter amount';
+            taxGroup.style.display = 'block';
+            calculatedAmount.style.display = 'none';
+        }
+    }
+    
+    // Initial update
+    updateMileageMode();
+    
+    // Add event listener for G/L code changes
+    glCodeSelect.addEventListener('change', updateMileageMode);
+    
+    // Add event listener for kilometer input
+    amountInput.addEventListener('input', function() {
+        if (glCodeSelect.value === '6026-000') {
+            const km = parseFloat(this.value) || 0;
+            const amount = (km * 0.72).toFixed(2);
+            calculatedAmount.textContent = `Amount: $${amount}`;
+        }
+    });
+    
+    // Close modal
+    const closeBtn = modal.querySelector('.close');
+    closeBtn.addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+    
+    // Cancel button
+    const cancelBtn = modal.querySelector('.modal-cancel');
+    cancelBtn.addEventListener('click', () => {
+        document.body.removeChild(modal);
+    });
+    
+    // Form submit
+    const form = modal.querySelector('form');
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
         
-        // Add event listener for km calculation
-        amountInput.addEventListener('input', calculateMileageAmount);
-    } else {
-        // Regular expense mode
-        amountLabel.textContent = 'Amount ($)';
-        amountInput.placeholder = 'Enter amount';
-        taxContainer.style.display = 'block';
-        descriptionLabel.textContent = 'Description';
+        const formData = new FormData(form);
+        const data = {};
+        formData.forEach((value, key) => {
+            data[key] = value;
+        });
         
-        // Remove mileage calculation listener
-        amountInput.removeEventListener('input', calculateMileageAmount);
+        // Handle mileage calculation
+        if (data.glCode === '6026-000') {
+            data.kilometers = parseFloat(data.amount) || 0;
+            data.amount = (data.kilometers * 0.72).toFixed(2);
+            data.tax = '0.00';
+        }
+        
+        // Show loading indicator
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Saving...';
+        submitBtn.disabled = true;
+        
+        // Make API request to update expense
+        fetch(`/api/expenses/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || 'Failed to update expense');
+                });
+            }
+            return response.json();
+        })
+        .then(updatedExpense => {
+            console.log('Expense updated:', updatedExpense);
+            
+            // Update row in table
+            row.querySelector('td:nth-child(1)').textContent = data.date;
+            
+            const titleElement = row.querySelector('td:nth-child(2)');
+            titleElement.innerHTML = `
+                <div class="title-text">${data.title}</div>
+                <div class="description-text">${data.description}</div>
+            `;
+            
+            row.querySelector('td:nth-child(3)').textContent = `$${data.amount}`;
+            row.querySelector('td:nth-child(4)').textContent = `$${data.tax || '0.00'}`;
+            
+            const selectElement = row.querySelector('td:nth-child(5) select');
+            if (selectElement) {
+                selectElement.value = data.glCode;
+            }
+            
+            // Close modal
+            document.body.removeChild(modal);
+        })
+        .catch(error => {
+            console.error('Error updating expense:', error);
+            alert(`Error updating expense: ${error.message || 'Please try again'}`);
+            
+            // Reset button
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
+        });
+    });
+}
+
+// Handle Email export (combines Excel and PDF)
+async function handleEmailExport() {
+    if (expenses.length === 0) {
+        showNotification('No expenses to export', 'error');
+        return;
+    }
+    
+    try {
+        // Show loading indicator
+        loadingOverlay.classList.add('active');
+        document.querySelector('.loading-overlay p').textContent = 'Preparing files for email...';
+        
+        // Get the currently filtered expenses or all expenses
+        const dataToExport = filteredExpenses.length > 0 ? filteredExpenses : expenses;
+        
+        // Send request to server to prepare files
+        const response = await fetch('/api/export-email', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                expenses: dataToExport,
+                sessionId: currentSessionId 
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to prepare files for email');
+        }
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to prepare files for email');
+        }
+        
+        // Get file paths from the response
+        const { excelPath, pdfPath } = result;
+        
+        // Get full URLs for the files
+        const fileUrls = [];
+        if (excelPath) {
+            fileUrls.push(`${window.location.origin}${excelPath}`);
+        }
+        if (pdfPath) {
+            fileUrls.push(`${window.location.origin}${pdfPath}`);
+        }
+        
+        // Hide loading indicator
+        loadingOverlay.classList.remove('active');
+        
+        // Compose email subject and body
+        const subject = 'Greenwin Expense Report';
+        const body = 'Please find attached the expense report files.';
+        
+        // Attempt to open Outlook directly
+        try {
+            // Use the 'ms-outlook:' protocol to open Outlook with attachments
+            let outlookUrl = `ms-outlook:compose?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+            
+            // Add attachments if we have files
+            if (fileUrls.length > 0) {
+                outlookUrl += `&attachment=${encodeURIComponent(fileUrls.join(','))}`;
+            }
+            
+            // Attempt to open Outlook
+            window.location.href = outlookUrl;
+            
+            // Show a notification about opening Outlook
+            showNotification('Opening Outlook with expense report files...', 'success');
+            
+            // After a short delay, check if Outlook opened successfully
+            setTimeout(() => {
+                // Fallback if Outlook didn't open
+                if (document.hasFocus()) {
+                    console.log('Outlook may not have opened, offering fallback method');
+                    offerFallbackMethod(fileUrls, subject, body);
+                }
+            }, 2000);
+        } catch (outlookError) {
+            console.error('Error opening Outlook:', outlookError);
+            // Fallback to alternative method
+            offerFallbackMethod(fileUrls, subject, body);
+        }
+    } catch (error) {
+        console.error('Error preparing email:', error);
+        loadingOverlay.classList.remove('active');
+        showNotification('Failed to prepare email: ' + error.message, 'error');
     }
 }
 
-function calculateMileageAmount(event) {
-    const kilometers = parseFloat(event.target.value) || 0;
-    const ratePerKm = 0.72;
-    const calculatedAmount = (kilometers * ratePerKm).toFixed(2);
+// Function to provide a fallback method when Outlook can't be opened
+function offerFallbackMethod(fileUrls, subject, body) {
+    // Create a modal or notification to inform the user
+    const fallbackModal = document.createElement('div');
+    fallbackModal.className = 'modal fade show';
+    fallbackModal.style.display = 'block';
+    fallbackModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
     
-    // Show calculated amount below the input
-    let calculatedDiv = document.getElementById('calculated-amount');
-    if (!calculatedDiv) {
-        calculatedDiv = document.createElement('div');
-        calculatedDiv.id = 'calculated-amount';
-        event.target.parentNode.appendChild(calculatedDiv);
-    }
-    calculatedDiv.textContent = `Amount to be reimbursed: $${calculatedAmount}`;
+    fallbackModal.innerHTML = `
+        <div class="modal-dialog" style="margin-top: 100px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Outlook Not Detected</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>We couldn't open Outlook automatically. Would you like to:</p>
+                    <div class="mt-3">
+                        <button id="download-files-btn" class="btn btn-primary mr-2">
+                            Download Files
+                        </button>
+                        <button id="use-default-email-btn" class="btn btn-secondary">
+                            Use Default Email App
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
     
-    // Update hidden amount field for form submission
-    const hiddenAmount = document.createElement('input');
-    hiddenAmount.type = 'hidden';
-    hiddenAmount.name = 'actualAmount';
-    hiddenAmount.value = calculatedAmount;
-    event.target.parentNode.appendChild(hiddenAmount);
+    document.body.appendChild(fallbackModal);
+    
+    // Add event listeners to buttons
+    document.getElementById('download-files-btn').addEventListener('click', async () => {
+        // Download the files
+        for (const url of fileUrls) {
+            const filename = url.split('/').pop();
+            await downloadFile(url, filename);
+        }
+        
+        fallbackModal.remove();
+        showNotification('Files downloaded successfully. Please attach them to your email manually.', 'success', 10000);
+    });
+    
+    document.getElementById('use-default-email-btn').addEventListener('click', () => {
+        // Use the default mailto link
+        const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.location.href = mailtoLink;
+        
+        fallbackModal.remove();
+        showNotification('Default email client opened. Please attach the files manually.', 'info', 10000);
+    });
+    
+    // Close button event
+    fallbackModal.querySelector('.close').addEventListener('click', () => {
+        fallbackModal.remove();
+    });
 }
 
-// Add event listener to G/L code dropdown
-document.addEventListener('DOMContentLoaded', function() {
-    const glCodeDropdown = document.querySelector('select[name="glCode"]');
-    if (glCodeDropdown) {
-        glCodeDropdown.addEventListener('change', handleGLCodeChange);
+// Function to download a file
+async function downloadFile(url, filename) {
+    // Create a temporary link element
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    
+    // Add the link to the document and trigger the download
+    document.body.appendChild(link);
+    link.click();
+    
+    // Remove the link from the DOM
+    setTimeout(() => {
+        document.body.removeChild(link);
+    }, 100);
+    
+    // Return a promise that resolves after a delay to ensure the download starts
+    return new Promise(resolve => setTimeout(resolve, 500));
+}
+
+// Initialize signature functionality
+function initSignature() {
+    // Canvas drawing signature
+    signatureCanvas = document.getElementById('signature-canvas');
+    if (!signatureCanvas) return;
+    
+    // Fix canvas resolution to match display size
+    const dpr = window.devicePixelRatio || 1;
+    const rect = signatureCanvas.getBoundingClientRect();
+    
+    // Set the canvas dimensions to match its CSS dimensions
+    signatureCanvas.width = rect.width * dpr;
+    signatureCanvas.height = rect.height * dpr;
+    
+    signatureCtx = signatureCanvas.getContext('2d');
+    
+    // Scale the context to account for the device pixel ratio
+    signatureCtx.scale(dpr, dpr);
+    
+    // Set up canvas for drawing
+    signatureCtx.lineWidth = 2;
+    signatureCtx.lineCap = 'round';
+    signatureCtx.strokeStyle = '#000000';
+    
+    // Event listeners for canvas drawing
+    signatureCanvas.addEventListener('mousedown', startDrawing);
+    signatureCanvas.addEventListener('touchstart', handleTouchStart);
+    signatureCanvas.addEventListener('mousemove', draw);
+    signatureCanvas.addEventListener('touchmove', handleTouchMove);
+    signatureCanvas.addEventListener('mouseup', stopDrawing);
+    signatureCanvas.addEventListener('touchend', stopDrawing);
+    signatureCanvas.addEventListener('mouseout', stopDrawing);
+    
+    // Clear button
+    const clearBtn = document.getElementById('clear-signature');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearSignature);
     }
-}); 
+    
+    // Save drawn signature button
+    const saveDrawnBtn = document.getElementById('save-drawn-signature');
+    if (saveDrawnBtn) {
+        saveDrawnBtn.addEventListener('click', saveDrawnSignature);
+    }
+    
+    // Signature upload
+    const signatureUpload = document.getElementById('signature-upload');
+    if (signatureUpload) {
+        signatureUpload.addEventListener('change', handleSignatureUpload);
+    }
+    
+    // Save uploaded signature button
+    const saveUploadedBtn = document.getElementById('save-uploaded-signature');
+    if (saveUploadedBtn) {
+        saveUploadedBtn.addEventListener('click', saveUploadedSignature);
+    }
+    
+    // Tab switching
+    const drawTab = document.getElementById('draw-tab');
+    const uploadTab = document.getElementById('upload-tab');
+    
+    if (drawTab && uploadTab) {
+        drawTab.addEventListener('click', () => switchSignatureTab('draw'));
+        uploadTab.addEventListener('click', () => switchSignatureTab('upload'));
+    }
+    
+    // Change signature button
+    const changeSignatureBtn = document.getElementById('change-signature');
+    if (changeSignatureBtn) {
+        changeSignatureBtn.addEventListener('click', changeSignature);
+    }
+    
+    // Check for saved signature in localStorage
+    loadSavedSignature();
+    
+    // Add window resize handler to update canvas dimensions
+    window.addEventListener('resize', debounce(function() {
+        // Re-initialize the canvas when the window is resized
+        updateCanvasDimensions();
+    }, 250));
+}
+
+// Update canvas dimensions on resize
+function updateCanvasDimensions() {
+    if (!signatureCanvas) return;
+    
+    const dpr = window.devicePixelRatio || 1;
+    const rect = signatureCanvas.getBoundingClientRect();
+    
+    // Save current drawing
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = signatureCanvas.width;
+    tempCanvas.height = signatureCanvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(signatureCanvas, 0, 0);
+    
+    // Resize canvas
+    signatureCanvas.width = rect.width * dpr;
+    signatureCanvas.height = rect.height * dpr;
+    
+    // Restore context settings
+    signatureCtx = signatureCanvas.getContext('2d');
+    signatureCtx.scale(dpr, dpr);
+    signatureCtx.lineWidth = 2;
+    signatureCtx.lineCap = 'round';
+    signatureCtx.strokeStyle = '#000000';
+    
+    // Restore drawing
+    signatureCtx.drawImage(tempCanvas, 0, 0, signatureCanvas.width, signatureCanvas.height);
+}
+
+// Handle touch events for mobile drawing
+function handleTouchStart(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = signatureCanvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    isDrawing = true;
+    signatureCtx.beginPath();
+    signatureCtx.moveTo(x, y);
+}
+
+function handleTouchMove(e) {
+    if (!isDrawing) return;
+    e.preventDefault();
+    
+    const touch = e.touches[0];
+    const rect = signatureCanvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    signatureCtx.lineTo(x, y);
+    signatureCtx.stroke();
+}
+
+// Start drawing on canvas
+function startDrawing(e) {
+    isDrawing = true;
+    
+    const rect = signatureCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    signatureCtx.beginPath();
+    signatureCtx.moveTo(x, y);
+}
+
+// Draw on canvas as mouse/touch moves
+function draw(e) {
+    if (!isDrawing) return;
+    
+    const rect = signatureCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    signatureCtx.lineTo(x, y);
+    signatureCtx.stroke();
+    
+    // Hide the "Sign here" instructions once drawing starts
+    const instructions = document.querySelector('.signature-instructions');
+    if (instructions) {
+        instructions.style.display = 'none';
+    }
+}
+
+// Stop drawing
+function stopDrawing() {
+    isDrawing = false;
+}
+
+// Clear the signature canvas
+function clearSignature() {
+    signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+    
+    // Show the "Sign here" instructions again
+    const instructions = document.querySelector('.signature-instructions');
+    if (instructions) {
+        instructions.style.display = 'flex';
+    }
+}
+
+// Save the drawn signature
+function saveDrawnSignature() {
+    // Check if canvas is empty
+    const isCanvasEmpty = isSignatureCanvasEmpty();
+    if (isCanvasEmpty) {
+        showNotification('Please draw your signature first', 'error');
+        return;
+    }
+    
+    // Create a temporary canvas with white background for better visibility in Excel
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = signatureCanvas.width;
+    tempCanvas.height = signatureCanvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // Fill with white background
+    tempCtx.fillStyle = 'white';
+    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    
+    // Draw the signature on top
+    tempCtx.drawImage(signatureCanvas, 0, 0);
+    
+    // Convert enhanced canvas to base64 image with white background
+    const signatureData = tempCanvas.toDataURL('image/png');
+    
+    // Save signature to localStorage
+    saveSignature(signatureData);
+    
+    console.log('Signature saved with white background');
+}
+
+// Check if the signature canvas is empty
+function isSignatureCanvasEmpty() {
+    const pixelData = signatureCtx.getImageData(0, 0, signatureCanvas.width, signatureCanvas.height).data;
+    
+    // Check if all pixels are transparent (alpha = 0)
+    for (let i = 3; i < pixelData.length; i += 4) {
+        if (pixelData[i] > 0) {
+            return false; // Found a non-transparent pixel
+        }
+    }
+    
+    return true; // Canvas is empty
+}
+
+// Handle signature image upload
+function handleSignatureUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    // Validate file type
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+        showNotification('Please upload a PNG or JPG image', 'error');
+        return;
+    }
+    
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+        showNotification('Signature image must be less than 2MB', 'error');
+        return;
+    }
+    
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const previewContainer = document.getElementById('signature-preview-container');
+        const preview = document.getElementById('signature-preview');
+        
+        if (previewContainer && preview) {
+            preview.src = event.target.result;
+            previewContainer.style.display = 'block';
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+// Save the uploaded signature image
+function saveUploadedSignature() {
+    const preview = document.getElementById('signature-preview');
+    if (!preview || !preview.src || preview.src === '') {
+        showNotification('Please upload a signature image first', 'error');
+        return;
+    }
+    
+    // Save signature to localStorage
+    saveSignature(preview.src);
+}
+
+// Save signature to localStorage and update UI
+function saveSignature(signatureData) {
+    // Save to localStorage
+    localStorage.setItem('userSignature', signatureData);
+    userSignature = signatureData;
+    
+    // Update UI to show current signature
+    showCurrentSignature();
+    
+    showNotification('Signature saved successfully', 'success');
+}
+
+// Load saved signature from localStorage
+function loadSavedSignature() {
+    const savedSignature = localStorage.getItem('userSignature');
+    if (savedSignature) {
+        userSignature = savedSignature;
+        showCurrentSignature();
+    }
+}
+
+// Show the current saved signature
+function showCurrentSignature() {
+    const drawPanel = document.getElementById('draw-signature-panel');
+    const uploadPanel = document.getElementById('upload-signature-panel');
+    const currentContainer = document.getElementById('current-signature-container');
+    const currentSignatureImg = document.getElementById('current-signature');
+    
+    if (drawPanel && uploadPanel && currentContainer && currentSignatureImg) {
+        // Hide signature panels
+        drawPanel.classList.remove('active');
+        uploadPanel.classList.remove('active');
+        
+        // Show current signature container
+        currentContainer.style.display = 'block';
+        currentSignatureImg.src = userSignature;
+    }
+}
+
+// Change signature (remove current and show options again)
+function changeSignature() {
+    const drawPanel = document.getElementById('draw-signature-panel');
+    const drawTab = document.getElementById('draw-tab');
+    const uploadPanel = document.getElementById('upload-signature-panel');
+    const uploadTab = document.getElementById('upload-tab');
+    const currentContainer = document.getElementById('current-signature-container');
+    
+    if (drawPanel && uploadPanel && currentContainer) {
+        // Show drawing panel and tab
+        drawPanel.classList.add('active');
+        drawTab.classList.add('active');
+        
+        // Hide upload panel and tab
+        uploadPanel.classList.remove('active');
+        uploadTab.classList.remove('active');
+        
+        // Hide current signature container
+        currentContainer.style.display = 'none';
+        
+        // Clear the canvas
+        clearSignature();
+    }
+}
+
+// Switch between draw and upload tabs
+function switchSignatureTab(tab) {
+    const drawPanel = document.getElementById('draw-signature-panel');
+    const drawTab = document.getElementById('draw-tab');
+    const uploadPanel = document.getElementById('upload-signature-panel');
+    const uploadTab = document.getElementById('upload-tab');
+    
+    if (drawPanel && uploadPanel && drawTab && uploadTab) {
+        if (tab === 'draw') {
+            drawPanel.classList.add('active');
+            drawTab.classList.add('active');
+            uploadPanel.classList.remove('active');
+            uploadTab.classList.remove('active');
+        } else {
+            uploadPanel.classList.add('active');
+            uploadTab.classList.add('active');
+            drawPanel.classList.remove('active');
+            drawTab.classList.remove('active');
+        }
+    }
+}
+
+// Reset all data
+function resetAllData() {
+    // Show confirmation dialog
+    if (!confirm("Are you sure you want to reset all data? This will clear all expenses, signatures, and form inputs.")) {
+        return; // User cancelled
+    }
+    
+    // Show loading indicator
+    loadingOverlay.classList.add('active');
+    document.querySelector('.loading-overlay p').textContent = 'Resetting application...';
+    
+    try {
+        // 1. Clear expenses
+        expenses = [];
+        filteredExpenses = [];
+        renderExpenses();
+        updateTotalAmount();
+        
+        // 2. Clear signature
+        if (signatureCanvas && signatureCtx) {
+            clearSignature();
+            localStorage.removeItem('userSignature');
+            userSignature = null;
+            
+            // Reset signature UI
+            const drawPanel = document.getElementById('draw-signature-panel');
+            const drawTab = document.getElementById('draw-tab');
+            const uploadPanel = document.getElementById('upload-signature-panel');
+            const uploadTab = document.getElementById('upload-tab');
+            const currentContainer = document.getElementById('current-signature-container');
+            
+            if (drawPanel && uploadPanel && currentContainer) {
+                drawPanel.classList.add('active');
+                drawTab.classList.add('active');
+                uploadPanel.classList.remove('active');
+                uploadTab.classList.remove('active');
+                currentContainer.style.display = 'none';
+            }
+        }
+        
+        // 3. Reset form inputs
+        const nameInput = document.getElementById('user-name');
+        const departmentInput = document.getElementById('user-department');
+        const pdfFileInput = document.getElementById('pdf-file');
+        
+        if (nameInput) nameInput.value = '';
+        if (departmentInput) departmentInput.value = '';
+        if (pdfFileInput) pdfFileInput.value = '';
+        
+        // 4. Clear results container
+        const resultsContainer = document.getElementById('pdf-results-container');
+        if (resultsContainer) resultsContainer.innerHTML = '';
+        
+        // 5. Clear upload status
+        const uploadStatus = document.getElementById('pdf-upload-status');
+        if (uploadStatus) uploadStatus.innerHTML = '';
+        
+        // 6. Reset session ID
+        currentSessionId = null;
+        
+        // Hide loading indicator
+        loadingOverlay.classList.remove('active');
+        
+        // Show success notification
+        showNotification('Application reset successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error resetting application:', error);
+        loadingOverlay.classList.remove('active');
+        showNotification('Failed to reset application: ' + error.message, 'error');
+    }
+}
+
+// ... existing code ... 

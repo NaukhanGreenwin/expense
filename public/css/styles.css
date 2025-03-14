@@ -192,8 +192,64 @@ input:focus, select:focus {
 }
 
 .btn-secondary:hover {
-    background-color: #e5e5ea;
+    background-color: rgba(90, 142, 222, 0.2);
     transform: translateY(-1px);
+}
+
+.btn-danger {
+    background-color: rgba(255, 59, 48, 0.1);
+    color: var(--danger-color);
+    border: none;
+    border-radius: 10px;
+    padding: 0.85rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.btn-danger:hover {
+    background-color: rgba(255, 59, 48, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.2);
+}
+
+/* Apple-style buttons */
+.apple-button {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 113, 227, 0.25);
+}
+
+.apple-button:hover {
+    background-color: #0062cc;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
+}
+
+.apple-secondary-button {
+    background-color: rgba(142, 142, 147, 0.12);
+    color: #3a3a3c;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.apple-secondary-button:hover {
+    background-color: rgba(142, 142, 147, 0.18);
 }
 
 /* Form Layout */
@@ -924,10 +980,11 @@ select.gl-dropdown {
 }
 
 /* Export buttons styling - wider buttons */
-#export-excel-btn, #export-pdf-btn {
+#export-excel-btn,
+#export-pdf-btn {
     min-width: 180px;
     padding: 0.85rem 1.2rem;
-    white-space: nowrap;
+    margin-left: 10px;
 }
 
 #export-pdf-btn {
@@ -949,19 +1006,24 @@ select.gl-dropdown {
 }
 
 #export-excel-btn:hover {
-    background-color: rgba(52, 199, 89, 0.2);
+    background-color: #006400;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(52, 199, 89, 0.2);
 }
 
+/* Media query adjustments for mobile devices */
 @media (max-width: 768px) {
-    .expenses-actions {
+    .expenses-header {
         flex-direction: column;
-        width: 100%;
     }
     
     .expenses-filter {
         width: 100%;
+        margin-bottom: 1rem;
+    }
+    
+    .expenses-actions {
+        flex-wrap: wrap;
+        gap: 10px;
     }
     
     #export-excel-btn,
@@ -1231,4 +1293,352 @@ header.minimal-header {
     color: #2e7d32;
     font-weight: bold;
     font-size: 0.9em;
+}
+
+/* Add styles for file limit note */
+.file-limit-note {
+    font-size: 0.85rem;
+    color: var(--secondary-color);
+    margin-top: 0.5rem;
+    font-style: italic;
+    display: flex;
+    align-items: center;
+}
+
+.file-limit-note::before {
+    content: '\f05a'; /* info icon */
+    font-family: "Font Awesome 5 Free";
+    font-weight: 900;
+    margin-right: 0.5rem;
+    color: #007aff;
+}
+
+/* Digital Signature Section */
+.signature-section {
+    background-color: white;
+    border-radius: 18px;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.06);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.signature-section.apple-style {
+    background-color: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    padding: 2.5rem;
+    transition: all 0.3s ease;
+    max-width: 700px;
+    margin: 0 auto 2rem;
+}
+
+.signature-section:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 25px rgba(0, 0, 0, 0.08);
+}
+
+.signature-header {
+    margin-bottom: 1.5rem;
+}
+
+.apple-style .signature-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.signature-header h2 {
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.5rem;
+    color: var(--dark-color);
+}
+
+.apple-style .signature-header h2 {
+    justify-content: center;
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+.signature-header p {
+    color: var(--accent-color);
+    font-size: 0.9rem;
+}
+
+.apple-style .signature-header p {
+    font-size: 1rem;
+    margin-top: 0.5rem;
+}
+
+.signature-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.signature-tabs {
+    display: flex;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+
+.apple-style .signature-tabs {
+    justify-content: center;
+    border-bottom: none;
+    margin-bottom: 2rem;
+    background-color: rgba(0, 0, 0, 0.03);
+    border-radius: 10px;
+    padding: 0.3rem;
+}
+
+.signature-tab {
+    background: none;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--accent-color);
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.apple-style .signature-tab {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    color: #3a3a3c;
+    z-index: 1;
+}
+
+.signature-tab.active {
+    color: var(--primary-color);
+}
+
+.apple-style .signature-tab.active {
+    color: #1d1d1f;
+    font-weight: 600;
+    background-color: white;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.signature-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background-color: var(--primary-color);
+}
+
+.apple-style .signature-tab.active::after {
+    display: none;
+}
+
+.signature-panel {
+    display: none;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.signature-panel.active {
+    display: flex;
+}
+
+.canvas-container {
+    position: relative;
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.signature-instructions {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #c7c7cc;
+    font-size: 1.1rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    pointer-events: none; /* This ensures the text doesn't interfere with drawing */
+}
+
+#signature-canvas {
+    border: 2px dashed var(--border-color);
+    border-radius: 6px;
+    cursor: crosshair;
+    background-color: #fafafa;
+    width: 100%;
+    max-width: 600px;
+    height: 200px;
+    margin: 0 auto;
+}
+
+.apple-style #signature-canvas {
+    border: 1px solid #e5e5ea;
+    border-radius: 10px;
+    background-color: white;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);
+    height: 160px;
+}
+
+.signature-actions {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.apple-style .signature-actions {
+    margin-top: 1.5rem;
+    gap: 1.5rem;
+}
+
+.upload-signature-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+    padding: 1.5rem;
+    border: 2px dashed var(--border-color);
+    border-radius: 6px;
+    background-color: #fafafa;
+}
+
+.apple-style .upload-signature-container {
+    border: 1px dashed #c7c7cc;
+    border-radius: 12px;
+    background-color: white;
+    padding: 2.5rem 1.5rem;
+}
+
+.upload-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    padding: 1.5rem;
+    border-radius: 10px;
+    background-color: white;
+    width: 100%;
+    max-width: 300px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
+}
+
+.upload-label:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+.upload-label i {
+    font-size: 2rem;
+    color: var(--primary-color);
+}
+
+.upload-label span {
+    font-weight: 500;
+}
+
+.upload-label .upload-hint {
+    font-size: 0.85rem;
+    font-weight: normal;
+    color: var(--accent-color);
+}
+
+.apple-style input[type="file"] {
+    width: 0.1px;
+    height: 0.1px;
+    opacity: 0;
+    overflow: hidden;
+    position: absolute;
+    z-index: -1;
+}
+
+#signature-preview-container {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+.apple-style #signature-preview-container {
+    margin-top: 2rem;
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    width: 100%;
+    max-width: 400px;
+}
+
+.apple-style #signature-preview-container p {
+    margin-bottom: 1rem;
+    font-weight: 500;
+    color: #3a3a3c;
+}
+
+#signature-preview,
+#current-signature {
+    max-width: 100%;
+    max-height: 150px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: white;
+    padding: 0.5rem;
+}
+
+.apple-style #signature-preview,
+.apple-style #current-signature {
+    border: none;
+    border-radius: 8px;
+    padding: 0;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+#current-signature-container {
+    text-align: center;
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: white;
+}
+
+.apple-style #current-signature-container {
+    border: none;
+    border-radius: 12px;
+    background-color: white;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    padding: 2rem;
+}
+
+.current-signature-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.apple-style .current-signature-header {
+    margin-bottom: 1.5rem;
+}
+
+.apple-style .current-signature-header h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.current-signature-wrapper {
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 10px;
+    width: 100%;
+    max-width: 500px;
+    margin: 0 auto;
 } 

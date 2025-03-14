@@ -15,6 +15,14 @@ const { v4: uuidv4 } = require('uuid');
 const archiver = require('archiver');
 const sessions = new Map(); // Store session data
 
+// Expenses data store - in-memory for demo purposes
+let expenses = [];
+
+// Function to save expenses (for demo, just logs a message)
+function saveExpenses() {
+  console.log("Expenses data updated");
+}
+
 // Add debugging - print environment variables
 console.log('Environment variables:');
 console.log('PORT:', process.env.PORT);
@@ -57,25 +65,60 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Routes
 app.get('/api/expenses', (req, res) => {
   // This would normally fetch from a database
-  const sampleExpenses = [];
-  
-  res.json(sampleExpenses);
+  res.json(expenses);
 });
 
 app.post('/api/expenses', (req, res) => {
   // This would normally save to a database
   console.log('New expense:', req.body);
-  // Return success response with mock ID
-  res.status(201).json({ id: Date.now(), ...req.body });
+  // Create a new expense with ID and add it to our array
+  const newExpense = { 
+    id: Date.now(), 
+    ...req.body 
+  };
+  expenses.push(newExpense);
+  saveExpenses();
+  // Return success response with ID
+  res.status(201).json(newExpense);
 });
 
-// Add the missing PUT route handler for updating expenses
+// Fix the PUT route handler for updating expenses
 app.put('/api/expenses/:id', (req, res) => {
-  // This would normally update in a database
-  console.log('Updating expense:', req.params.id, req.body);
+  const id = parseInt(req.params.id);
+  const updatedExpense = req.body;
   
-  // Return success response
-  res.json({ id: req.params.id, ...req.body });
+  // Handle mileage calculation if G/L code is 6026-000
+  if (updatedExpense.glCode === '6026-000') {
+    // Use provided kilometers if available
+    const kilometers = parseFloat(updatedExpense.kilometers) || parseFloat(updatedExpense.amount) || 0;
+    updatedExpense.kilometers = kilometers;
+    updatedExpense.amount = (kilometers * 0.72).toFixed(2);
+    updatedExpense.tax = 0; // No tax for mileage
+    
+    // Store mileage-specific fields
+    if (updatedExpense.fromLocation && updatedExpense.toLocation) {
+      // These fields are already in the updatedExpense object from the client
+      console.log(`Mileage from ${updatedExpense.fromLocation} to ${updatedExpense.toLocation}`);
+    }
+  }
+  
+  console.log('Updating expense:', id, updatedExpense);
+  
+  // Update the expense in expenses array
+  const index = expenses.findIndex(e => e.id === id);
+  if (index !== -1) {
+    expenses[index] = { ...expenses[index], ...updatedExpense };
+    saveExpenses();
+    return res.json(expenses[index]);
+  } 
+  
+  // If the expense doesn't exist in our array yet, add it
+  // This handles the case where expenses were created before our array was initialized
+  const newExpense = { id, ...updatedExpense };
+  expenses.push(newExpense);
+  saveExpenses();
+  console.log(`Added expense ${id} to expenses array since it didn't exist`);
+  return res.json(newExpense);
 });
 
 // Add helper function to clean up uploads directory
@@ -262,7 +305,7 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
 // Export expenses to Excel
 app.post('/api/export-excel', async (req, res) => {
   try {
-    const { expenses } = req.body;
+    const { expenses, signature } = req.body;
     
     if (!expenses || !Array.isArray(expenses) || expenses.length === 0) {
       return res.status(400).json({ success: false, error: 'No expense data provided' });
@@ -276,313 +319,930 @@ app.post('/api/export-excel', async (req, res) => {
     // Add a worksheet with properties
     const worksheet = workbook.addWorksheet('Expense Report', {
       properties: {
-        tabColor: { argb: '00A651' }, // Green tab color
         defaultRowHeight: 18
       }
     });
     
-    // Set column widths for better display - removed Name/Department columns as per image
+    // Set column widths
     worksheet.columns = [
-      { width: 15, style: { numFmt: 'mm/dd/yyyy' } }, // A - Date
-      { width: 30 }, // B - Merchant
-      { width: 45 }, // C - Description
-      { width: 15, style: { numFmt: '$#,##0.00', alignment: { horizontal: 'right' } } }, // D - Amount
-      { width: 15, style: { numFmt: '$#,##0.00', alignment: { horizontal: 'right' } } }, // E - Tax
-      { width: 15 }, // F - G/L Code
+      { width: 17 }, // A - DATE
+      { width: 40 }, // B - DESCRIPTION (increased for longer descriptions)
+      { width: 17 }, // C - Office & General
+      { width: 17 }, // D - Membership
+      { width: 17 }, // E - Subscriptions
+      { width: 17 }, // F - Education & Development
+      { width: 17 }, // G - Mileage/ETR
     ];
     
-    // Add header/title section (rows 1-3)
-    worksheet.mergeCells('A1:C1');
-    const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'GREENWIN';
-    titleCell.font = { bold: true, size: 16, color: { argb: '000000' } };
-    titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+    // -- HEADER SECTION --
     
-    // Create report title
-    worksheet.mergeCells('A2:C2');
-    const subtitleCell = worksheet.getCell('A2');
-    subtitleCell.value = 'EXPENSE REPORT';
-    subtitleCell.font = { bold: true, size: 14, color: { argb: '000000' } };
-    subtitleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+    // Top section - Name and Date Submitted
+    const nameCell = worksheet.getCell('A1');
+    nameCell.value = 'Name:';
+    nameCell.font = { bold: true };
+    nameCell.border = {
+      top: { style: 'medium' },
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
     
-    // Add date and employee info on right side
-    worksheet.mergeCells('D1:E1');
-    const dateLabel = worksheet.getCell('D1');
-    dateLabel.value = 'Date:';
-    dateLabel.alignment = { horizontal: 'right', vertical: 'middle' };
-    dateLabel.font = { bold: true, size: 11 };
+    // Cell for name input
+    worksheet.mergeCells('B1:C1');
+    const nameInputCell = worksheet.getCell('B1');
+    nameInputCell.value = expenses[0]?.name || '';
+    nameInputCell.border = {
+      top: { style: 'medium' },
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
     
-    // Current date
-    const currentDate = new Date();
-    const dateCell = worksheet.getCell('F1');
-    dateCell.value = currentDate;
-    dateCell.numFmt = 'mmmm d yyyy';
-    dateCell.alignment = { horizontal: 'left', vertical: 'middle' };
+    // Date submitted
+    const dateSubmittedCell = worksheet.getCell('E1');
+    dateSubmittedCell.value = 'Date Submitted:';
+    dateSubmittedCell.font = { bold: true };
+    dateSubmittedCell.border = {
+      top: { style: 'medium' },
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
     
-    // Employee name from the first expense
-    worksheet.mergeCells('D2:E2');
-    const employeeLabel = worksheet.getCell('D2');
-    employeeLabel.value = 'Employee:';
-    employeeLabel.alignment = { horizontal: 'right', vertical: 'middle' };
-    employeeLabel.font = { bold: true, size: 11 };
+    // Cell for date input
+    worksheet.mergeCells('F1:G1');
+    const dateInputCell = worksheet.getCell('F1');
+    dateInputCell.value = new Date();
+    dateInputCell.numFmt = 'mmmm d yyyy';
+    dateInputCell.border = {
+      top: { style: 'medium' },
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
     
-    // Get employee name from the first expense
-    const employeeName = expenses[0]?.name || '';
-    const employeeCell = worksheet.getCell('F2');
-    employeeCell.value = employeeName;
-    employeeCell.alignment = { horizontal: 'left', vertical: 'middle' };
+    // Division to be charged
+    const divisionCell = worksheet.getCell('A2');
+    divisionCell.value = 'Division to be charged:';
+    divisionCell.font = { bold: true };
+    divisionCell.border = {
+      left: { style: 'medium' },
+      bottom: { style: 'thin' }
+    };
     
-    // Add G/L ALLOCATION header in row 4 with green background as in the image
-    worksheet.mergeCells('A4:F4');
-    const glHeaderCell = worksheet.getCell('A4');
+    // Division field spans multiple columns
+    worksheet.mergeCells('B2:G2');
+    const divisionInputCell = worksheet.getCell('B2');
+    divisionInputCell.value = expenses[0]?.department || '';
+    divisionInputCell.border = {
+      right: { style: 'medium' },
+      bottom: { style: 'thin' }
+    };
+    
+    // Team # and BLDG#
+    const teamCell = worksheet.getCell('C3');
+    teamCell.value = 'Team #:';
+    teamCell.font = { bold: true };
+    teamCell.alignment = { horizontal: 'right' };
+    
+    const teamInputCell = worksheet.getCell('D3');
+    teamInputCell.border = {
+      bottom: { style: 'medium' }
+    };
+    
+    const bldgCell = worksheet.getCell('C4');
+    bldgCell.value = 'BLDG#:';
+    bldgCell.font = { bold: true };
+    bldgCell.alignment = { horizontal: 'right' };
+    
+    const bldgInputCell = worksheet.getCell('D4');
+    bldgInputCell.border = {
+      bottom: { style: 'medium' }
+    };
+    
+    // Add borders to the right side of the header
+    for (let row = 3; row <= 4; row++) {
+      worksheet.getCell(`A${row}`).border = {
+        left: { style: 'medium' }
+      };
+      worksheet.getCell(`G${row}`).border = {
+        right: { style: 'medium' }
+      };
+    }
+    
+    // Complete border for the header section
+    worksheet.getCell('A5').border = {
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    worksheet.mergeCells('B5:G5');
+    worksheet.getCell('B5').border = {
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // -- PROMOTION EXPENSES SECTION --
+    
+    const promoRow = 6;
+    
+    // Promotion Expenses Header
+    worksheet.mergeCells(`A${promoRow}:B${promoRow}`);
+    const promoHeaderCell = worksheet.getCell(`A${promoRow}`);
+    promoHeaderCell.value = 'PROMOTION EXPENSES';
+    promoHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    promoHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
+    promoHeaderCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: '00A651' } // Green background
+    };
+    promoHeaderCell.border = {
+      top: { style: 'medium' },
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // G/L Allocation Header
+    worksheet.mergeCells(`C${promoRow}:G${promoRow}`);
+    const glHeaderCell = worksheet.getCell(`C${promoRow}`);
     glHeaderCell.value = 'G/L ALLOCATION';
     glHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    glHeaderCell.font = { bold: true, size: 12, color: { argb: 'FFFFFF' } };
+    glHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
     glHeaderCell.fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: '00A651' } // Green background
     };
-    worksheet.getRow(4).height = 24;
+    glHeaderCell.border = {
+      top: { style: 'medium' },
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
     
-    // Add gratuity note in yellow
-    worksheet.mergeCells('A5:F5');
-    const gratuityCell = worksheet.getCell('A5');
+    // G/L Codes Row
+    const glCodesRow = promoRow + 1;
+    worksheet.getCell(`A${glCodesRow}`).border = {
+      left: { style: 'medium' }
+    };
+    worksheet.getCell(`B${glCodesRow}`).border = {
+      right: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`C${glCodesRow}`).value = 'Other';
+    worksheet.getCell(`C${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`C${glCodesRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`D${glCodesRow}`).value = '6010-000';
+    worksheet.getCell(`D${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`D${glCodesRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`E${glCodesRow}`).value = '6011-000';
+    worksheet.getCell(`E${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`E${glCodesRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`F${glCodesRow}`).value = '6012-000';
+    worksheet.getCell(`F${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`F${glCodesRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`G${glCodesRow}`).border = {
+      right: { style: 'medium' }
+    };
+    
+    // Gratuity Note Row
+    const gratuityRow = glCodesRow + 1;
+    worksheet.mergeCells(`A${gratuityRow}:B${gratuityRow}`);
+    worksheet.getCell(`A${gratuityRow}`).border = {
+      left: { style: 'medium' },
+      right: { style: 'thin' }
+    };
+    
+    worksheet.mergeCells(`C${gratuityRow}:F${gratuityRow}`);
+    const gratuityCell = worksheet.getCell(`C${gratuityRow}`);
     gratuityCell.value = 'include gratuity where applicable';
     gratuityCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    gratuityCell.font = { italic: true, size: 11 };
+    gratuityCell.font = { italic: true };
     gratuityCell.fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: 'FFFF99' } // Light yellow background
     };
-    worksheet.getRow(5).height = 20;
+    gratuityCell.border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
     
-    // Add the table headers at row 6
-    const headerRow = worksheet.getRow(6);
-    headerRow.values = ['Date', 'Merchant', 'Description', 'Amount', 'Tax (13% HST)', 'G/L Code'];
-    headerRow.height = 22;
+    worksheet.getCell(`G${gratuityRow}`).border = {
+      right: { style: 'medium' }
+    };
     
-    // Style the header row
-    headerRow.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFFFCC' } // Light yellow background
+    // Category Labels Row
+    const categoryRow = gratuityRow + 1;
+    worksheet.getCell(`A${categoryRow}`).value = 'DATE';
+    worksheet.getCell(`A${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`A${categoryRow}`).font = { bold: true };
+    worksheet.getCell(`A${categoryRow}`).border = {
+      left: { style: 'medium' },
+      top: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`B${categoryRow}`).value = 'DESCRIPTION';
+    worksheet.getCell(`B${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`B${categoryRow}`).font = { bold: true };
+    worksheet.getCell(`B${categoryRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`C${categoryRow}`).value = 'Other';
+    worksheet.getCell(`C${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`C${categoryRow}`).font = { bold: true };
+    worksheet.getCell(`C${categoryRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`D${categoryRow}`).value = 'Food &\nEntertainment';
+    worksheet.getCell(`D${categoryRow}`).alignment = { horizontal: 'center', wrapText: true };
+    worksheet.getCell(`D${categoryRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`E${categoryRow}`).value = 'Social';
+    worksheet.getCell(`E${categoryRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`E${categoryRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`F${categoryRow}`).value = 'Travel Expenses\n(excl mileage)';
+    worksheet.getCell(`F${categoryRow}`).alignment = { horizontal: 'center', wrapText: true };
+    worksheet.getCell(`F${categoryRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`G${categoryRow}`).border = {
+      right: { style: 'medium' }
+    };
+    
+    // Add empty rows for Promotion expenses
+    let promoRowsStart = categoryRow + 1;
+    const promoRows = 10; // Number of empty rows for promotion expenses
+    
+    for (let i = 0; i < promoRows; i++) {
+      const row = worksheet.getRow(promoRowsStart + i);
+      
+      // Date cell
+      row.getCell(1).border = {
+        left: { style: 'medium' },
+        top: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
       };
-      cell.font = { bold: true, size: 11 };
-      cell.border = {
+      
+      // Description cell
+      row.getCell(2).border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
       };
-      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      
+      // Amount cells (C-F)
+      for (let col = 3; col <= 6; col++) {
+        row.getCell(col).border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+          bottom: { style: 'thin' }
+        };
+        row.getCell(col).numFmt = '$#,##0.00';
+        row.getCell(col).alignment = { horizontal: 'right' };
+      }
+      
+      // Right border
+      row.getCell(7).border = {
+        right: { style: 'medium' }
+      };
+    }
+    
+    // Promotion Summary Rows
+    const promoSummaryStart = promoRowsStart + promoRows;
+    
+    // Total Promotion Expenses row with SUM formulas
+    const row1 = worksheet.getRow(promoSummaryStart);
+    row1.getCell(1).border = { left: { style: 'medium' } };
+    row1.getCell(2).value = 'Total Promotion Expenses (incl. HST)';
+    row1.getCell(2).alignment = { horizontal: 'right' };
+    row1.getCell(2).font = { bold: true };
+    
+    for (let col = 3; col <= 6; col++) {
+      const colLetter = String.fromCharCode(64 + col); // Convert to column letter (C, D, E, F)
+      row1.getCell(col).value = {
+        formula: `SUM(${colLetter}${promoRowsStart}:${colLetter}${promoSummaryStart-1})`
+      };
+      row1.getCell(col).numFmt = '$#,##0.00';
+      row1.getCell(col).alignment = { horizontal: 'right' };
+      row1.getCell(col).font = { bold: true };
+      row1.getCell(col).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
+      };
+    }
+    
+    row1.getCell(7).border = { right: { style: 'medium' } };
+    
+    // HST row
+    const row2 = worksheet.getRow(promoSummaryStart + 1);
+    row2.getCell(1).border = { left: { style: 'medium' } };
+    row2.getCell(2).value = 'HST (G/L 2325-000)';
+    row2.getCell(2).alignment = { horizontal: 'right' };
+    
+    for (let col = 3; col <= 6; col++) {
+      row2.getCell(col).value = '-';
+      row2.getCell(col).alignment = { horizontal: 'center' };
+      row2.getCell(col).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
+      };
+    }
+    
+    row2.getCell(7).border = { right: { style: 'medium' } };
+    
+    // Net Amount row
+    const row3 = worksheet.getRow(promoSummaryStart + 2);
+    row3.getCell(1).border = { left: { style: 'medium' } };
+    row3.getCell(2).value = 'Net Amount (before HST)';
+    row3.getCell(2).alignment = { horizontal: 'right' };
+    
+    for (let col = 3; col <= 6; col++) {
+      row3.getCell(col).value = '-';
+      row3.getCell(col).alignment = { horizontal: 'center' };
+      row3.getCell(col).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
+      };
+    }
+    
+    row3.getCell(7).border = { right: { style: 'medium' } };
+    
+    // TOTAL PROMOTION with SUM formula across all promotion categories
+    const totalPromoRow = promoSummaryStart + 3;
+    worksheet.mergeCells(`A${totalPromoRow}:F${totalPromoRow}`);
+    worksheet.getCell(`A${totalPromoRow}`).value = 'TOTAL PROMOTION';
+    worksheet.getCell(`A${totalPromoRow}`).alignment = { horizontal: 'right' };
+    worksheet.getCell(`A${totalPromoRow}`).font = { bold: true };
+    worksheet.getCell(`A${totalPromoRow}`).border = {
+      left: { style: 'medium' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    // Add totals formula for TOTAL PROMOTION
+    worksheet.getCell(`G${totalPromoRow}`).value = {
+      formula: `SUM(C${promoSummaryStart}:F${promoSummaryStart})`
+    };
+    worksheet.getCell(`G${totalPromoRow}`).numFmt = '$#,##0.00';
+    worksheet.getCell(`G${totalPromoRow}`).font = { bold: true };
+    worksheet.getCell(`G${totalPromoRow}`).alignment = { horizontal: 'right' };
+    worksheet.getCell(`G${totalPromoRow}`).border = {
+      right: { style: 'medium' },
+      bottom: { style: 'thin' }
+    };
+    
+    // -- OTHER EXPENSES SECTION --
+    
+    const otherRow = totalPromoRow + 1;
+    
+    // Other Expenses Header
+    worksheet.mergeCells(`A${otherRow}:B${otherRow}`);
+    const otherHeaderCell = worksheet.getCell(`A${otherRow}`);
+    otherHeaderCell.value = 'OTHER EXPENSES';
+    otherHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    otherHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
+    otherHeaderCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: '00A651' } // Green background
+    };
+    otherHeaderCell.border = {
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // G/L Allocation Header for Other Expenses
+    worksheet.mergeCells(`C${otherRow}:G${otherRow}`);
+    const otherGlHeaderCell = worksheet.getCell(`C${otherRow}`);
+    otherGlHeaderCell.value = 'G/L ALLOCATION';
+    otherGlHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    otherGlHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
+    otherGlHeaderCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: '00A651' } // Green background
+    };
+    otherGlHeaderCell.border = {
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // G/L Codes Row for Other Expenses
+    const otherGlCodesRow = otherRow + 1;
+    
+    worksheet.getCell(`A${otherGlCodesRow}`).border = {
+      left: { style: 'medium' }
+    };
+    
+    worksheet.getCell(`B${otherGlCodesRow}`).border = {
+      right: { style: 'thin' }
+    };
+    
+    const otherGlCodes = [
+      { cell: 'C', code: '6408-000' },
+      { cell: 'D', code: '6402-000' },
+      { cell: 'E', code: '6404-000' },
+      { cell: 'F', code: '7335-000' },
+      { cell: 'G', code: '6026-000' }
+    ];
+    
+    otherGlCodes.forEach(item => {
+      worksheet.getCell(`${item.cell}${otherGlCodesRow}`).value = item.code;
+      worksheet.getCell(`${item.cell}${otherGlCodesRow}`).alignment = { horizontal: 'center' };
+      worksheet.getCell(`${item.cell}${otherGlCodesRow}`).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
+      };
     });
     
-    // Add rows for expense data starting at row 7
-    let rowIndex = 7;
-    let rowColor = false; // For alternating row colors
+    worksheet.getCell(`G${otherGlCodesRow}`).border.right = { style: 'medium' };
     
-    expenses.forEach((expense) => {
-      const row = worksheet.getRow(rowIndex);
-      
-      // Format date
-      let dateValue = expense.date;
-      if (typeof dateValue === 'string') {
-        try {
-          const dateObj = new Date(dateValue);
-          if (!isNaN(dateObj.getTime())) {
-            dateValue = dateObj;
+    // Category Labels Row for Other Expenses
+    const otherCategoryRow = otherGlCodesRow + 1;
+    
+    worksheet.getCell(`A${otherCategoryRow}`).value = 'DATE';
+    worksheet.getCell(`A${otherCategoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`A${otherCategoryRow}`).font = { bold: true };
+    worksheet.getCell(`A${otherCategoryRow}`).border = {
+      left: { style: 'medium' },
+      top: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    worksheet.getCell(`B${otherCategoryRow}`).value = 'DESCRIPTION';
+    worksheet.getCell(`B${otherCategoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`B${otherCategoryRow}`).font = { bold: true };
+    worksheet.getCell(`B${otherCategoryRow}`).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'thin' }
+    };
+    
+    const otherCategories = [
+      { cell: 'C', name: 'Office & General' },
+      { cell: 'D', name: 'Membership' },
+      { cell: 'E', name: 'Subscriptions' },
+      { cell: 'F', name: 'Education &\nDevelopment' },
+      { cell: 'G', name: 'Mileage/ ETR' }
+    ];
+    
+    otherCategories.forEach(item => {
+      worksheet.getCell(`${item.cell}${otherCategoryRow}`).value = item.name;
+      worksheet.getCell(`${item.cell}${otherCategoryRow}`).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      worksheet.getCell(`${item.cell}${otherCategoryRow}`).font = { bold: true };
+      worksheet.getCell(`${item.cell}${otherCategoryRow}`).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
+      };
+    });
+    
+    worksheet.getCell(`G${otherCategoryRow}`).border.right = { style: 'medium' };
+    
+    // Add data rows for expenses
+    let otherRowsStart = otherCategoryRow + 1;
+    
+    // Group expenses by G/L code
+    const expensesByGlCode = {};
+    expenses.forEach(expense => {
+      const glCode = expense.glCode || '';
+      if (!expensesByGlCode[glCode]) {
+        expensesByGlCode[glCode] = [];
+      }
+      expensesByGlCode[glCode].push(expense);
+    });
+    
+    // Add expense data
+    let currentRow = otherRowsStart;
+    Object.entries(expensesByGlCode).forEach(([glCode, groupExpenses]) => {
+      groupExpenses.forEach(expense => {
+        const row = worksheet.getRow(currentRow);
+        
+        // Format date
+        let dateValue = expense.date;
+        if (typeof dateValue === 'string') {
+          try {
+            const dateObj = new Date(dateValue);
+            if (!isNaN(dateObj.getTime())) {
+              dateValue = dateObj;
+            }
+          } catch (e) {
+            console.warn('Could not parse date:', e);
           }
-        } catch (e) {
-          console.warn('Could not parse date:', e);
         }
-      }
-      
-      // Calculate tax if it doesn't exist
-      let taxAmount = expense.tax;
-      if (taxAmount === undefined && expense.amount) {
-        taxAmount = parseFloat((expense.amount * 0.13).toFixed(2));
-      }
-      
-      // Populate data - aligned to the image layout
-      row.getCell(1).value = dateValue; // Date
-      row.getCell(2).value = expense.merchant || expense.title; // Merchant
-      row.getCell(3).value = expense.description || ''; // Description
-      row.getCell(4).value = expense.amount; // Amount
-      row.getCell(5).value = taxAmount || 0; // Tax
-      row.getCell(6).value = expense.glCode || ''; // G/L Code
-      
-      // Format the cells
-      row.height = 22;
-      
-      // Add alternating row colors for better readability
-      if (rowColor) {
-        row.eachCell((cell) => {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'F5F5F5' } // Light gray background
-          };
-        });
-      }
-      rowColor = !rowColor;
-      
-      row.eachCell((cell) => {
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'D0D0D0' } },
-          left: { style: 'thin', color: { argb: 'D0D0D0' } },
-          bottom: { style: 'thin', color: { argb: 'D0D0D0' } },
-          right: { style: 'thin', color: { argb: 'D0D0D0' } }
+        
+        // DATE column
+        row.getCell(1).value = dateValue;
+        row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+        row.getCell(1).border = {
+          left: { style: 'medium' },
+          top: { style: 'thin' },
+          right: { style: 'thin' },
+          bottom: { style: 'thin' }
         };
         
-        // Set alignment based on column
-        if (cell.col === 1) { // Date
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        } else if (cell.col === 2 || cell.col === 3) { // Merchant and Description
-          cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-        } else if (cell.col === 4 || cell.col === 5) { // Amount and Tax
-          cell.numFmt = '$#,##0.00';
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-        } else if (cell.col === 6) { // G/L Code
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        // DESCRIPTION column
+        row.getCell(2).value = expense.description || '';
+        row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        row.getCell(2).border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+          bottom: { style: 'thin' }
+        };
+        
+        // Amount in the appropriate column based on G/L code
+        let amountColumn = 0;
+        
+        switch (glCode) {
+          case '6408-000': amountColumn = 3; break; // Office & General
+          case '6402-000': amountColumn = 4; break; // Membership
+          case '6404-000': amountColumn = 5; break; // Subscriptions
+          case '7335-000': amountColumn = 6; break; // Education & Development
+          case '6026-000': amountColumn = 7; break; // Mileage/ETR
+          case '6010-000': amountColumn = 0; break; // Food & Entertainment - in promotion section
+          case '6011-000': amountColumn = 0; break; // Social - in promotion section
+          case '6012-000': amountColumn = 0; break; // Travel - in promotion section
+          default: amountColumn = 3; // Default to Office & General
+        }
+        
+        if (amountColumn > 0) {
+          // Add amount to the appropriate column
+          row.getCell(amountColumn).value = expense.amount;
+          row.getCell(amountColumn).numFmt = '$#,##0.00';
+          row.getCell(amountColumn).alignment = { horizontal: 'right', vertical: 'middle' };
+          row.getCell(amountColumn).border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            right: { style: 'thin' },
+            bottom: { style: 'thin' }
+          };
+          
+          // Clear other amount columns and add borders
+          for (let col = 3; col <= 7; col++) {
+            if (col !== amountColumn) {
+              row.getCell(col).border = {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                right: { style: 'thin' },
+                bottom: { style: 'thin' }
+              };
+            }
+          }
+          
+          // Ensure right border
+          row.getCell(7).border.right = { style: 'medium' };
+          
+          // Adjust row heights based on content length
+          const descLength = (expense.description || '').length;
+          if (descLength > 100) {
+            row.height = 45; // Extra tall for very long descriptions
+          } else if (descLength > 50) {
+            row.height = 35; // Taller for long descriptions
+          } else if (descLength > 25) {
+            row.height = 25; // Slightly taller for medium descriptions
+          } else {
+            row.height = 21; // Standard height for short descriptions
+          }
+          
+          currentRow++;
         }
       });
-      
-      rowIndex++;
     });
     
-    // Add empty rows for manual entry (10 extra rows)
-    for (let i = 0; i < 10; i++) {
-      const row = worksheet.getRow(rowIndex + i);
-      row.height = 22;
+    // Add a few empty rows if not enough expense data
+    const minRows = 10;
+    const emptyRowsNeeded = Math.max(0, minRows - (currentRow - otherRowsStart));
+    
+    for (let i = 0; i < emptyRowsNeeded; i++) {
+      const row = worksheet.getRow(currentRow + i);
       
-      // Add alternating row colors for better readability
-      if (rowColor) {
-        row.eachCell((cell) => {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'F5F5F5' } // Light gray background
-          };
-        });
-      }
-      rowColor = !rowColor;
+      // Date cell
+      row.getCell(1).border = {
+        left: { style: 'medium' },
+        top: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
+      };
       
-      // Add empty cells with borders
-      for (let col = 1; col <= 6; col++) {
-        const cell = row.getCell(col);
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'D0D0D0' } },
-          left: { style: 'thin', color: { argb: 'D0D0D0' } },
-          bottom: { style: 'thin', color: { argb: 'D0D0D0' } },
-          right: { style: 'thin', color: { argb: 'D0D0D0' } }
+      // Description cell
+      row.getCell(2).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'thin' }
+      };
+      
+      // Amount cells (C-G)
+      for (let col = 3; col <= 7; col++) {
+        row.getCell(col).border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          right: { style: 'thin' },
+          bottom: { style: 'thin' }
         };
-        
-        // Set alignment based on column
-        if (col === 1) { // Date
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        } else if (col === 2 || col === 3) { // Merchant and Description
-          cell.alignment = { horizontal: 'left', vertical: 'middle' };
-        } else if (col === 4 || col === 5) { // Amount and Tax
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-        } else if (col === 6) { // G/L Code
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        }
+        row.getCell(col).numFmt = '$#,##0.00';
+      }
+      
+      // Ensure right border
+      row.getCell(7).border.right = { style: 'medium' };
+    }
+    
+    // Update current row to account for empty rows added
+    currentRow += emptyRowsNeeded;
+    
+    // Add totals row
+    const totalsRow = currentRow;
+    const totalsRowObj = worksheet.getRow(totalsRow);
+    
+    // TOTAL label
+    totalsRowObj.getCell(1).value = 'TOTAL';
+    totalsRowObj.getCell(1).font = { bold: true };
+    totalsRowObj.getCell(1).alignment = { horizontal: 'right' };
+    totalsRowObj.getCell(1).border = {
+      left: { style: 'medium' },
+      top: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'double' }
+    };
+    
+    totalsRowObj.getCell(2).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'double' }
+    };
+    
+    // Total formulas for each column (C-G)
+    for (let col = 3; col <= 7; col++) {
+      const colLetter = String.fromCharCode(64 + col); // Convert to column letter (C, D, etc.)
+      totalsRowObj.getCell(col).value = {
+        formula: `SUM(${colLetter}${otherRowsStart}:${colLetter}${totalsRow-1})`
+      };
+      totalsRowObj.getCell(col).numFmt = '$#,##0.00';
+      totalsRowObj.getCell(col).font = { bold: true };
+      totalsRowObj.getCell(col).alignment = { horizontal: 'right' };
+      totalsRowObj.getCell(col).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+        bottom: { style: 'double' }
+      };
+    }
+    
+    // Ensure right border
+    totalsRowObj.getCell(7).border.right = { style: 'medium' };
+    
+    // Add GRAND TOTAL row that combines promotion and other expenses
+    const grandTotalRow = totalsRow + 1;
+    const grandTotalRowObj = worksheet.getRow(grandTotalRow);
+    
+    // GRAND TOTAL label
+    worksheet.mergeCells(`A${grandTotalRow}:F${grandTotalRow}`);
+    grandTotalRowObj.getCell(1).value = 'GRAND TOTAL (Promotion + Other Expenses)';
+    grandTotalRowObj.getCell(1).font = { bold: true, size: 12 };
+    grandTotalRowObj.getCell(1).alignment = { horizontal: 'right' };
+    grandTotalRowObj.getCell(1).border = {
+      left: { style: 'medium' },
+      top: { style: 'thin' },
+      right: { style: 'thin' },
+      bottom: { style: 'double' }
+    };
+    
+    // Grand total formula
+    grandTotalRowObj.getCell(7).value = {
+      formula: `G${totalPromoRow}+SUM(C${totalsRow}:G${totalsRow})`
+    };
+    grandTotalRowObj.getCell(7).numFmt = '$#,##0.00';
+    grandTotalRowObj.getCell(7).font = { bold: true, size: 12 };
+    grandTotalRowObj.getCell(7).alignment = { horizontal: 'right' };
+    grandTotalRowObj.getCell(7).border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'medium' },
+      bottom: { style: 'double' }
+    };
+    grandTotalRowObj.getCell(7).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'E6F2E6' } // Light green background
+    };
+    
+    // Set row heights
+    worksheet.getRow(promoRow).height = 24; // PROMOTION EXPENSES row
+    worksheet.getRow(categoryRow).height = 30; // Categories row
+    worksheet.getRow(otherRow).height = 24; // OTHER EXPENSES row
+    worksheet.getRow(otherCategoryRow).height = 32; // Other categories row
+    
+    // Set uniform row height for empty rows
+    for (let i = 0; i < promoRows; i++) {
+      worksheet.getRow(promoRowsStart + i).height = 21;
+    }
+    
+    // Set other formatting
+    for (let i = 1; i <= grandTotalRow; i++) {
+      if (!worksheet.getRow(i).height) {
+        worksheet.getRow(i).height = 21; // Default height for rows without specific height
       }
     }
     
-    // Add total row
-    const totalRowIndex = rowIndex + 10;
-    const totalRow = worksheet.getRow(totalRowIndex);
-    totalRow.height = 25;
+    // Add space for signatures
+    const signatureRow = grandTotalRow + 3;
+    const signaturesObj = worksheet.getRow(signatureRow);
     
-    // Merge cells for "Total" label
-    worksheet.mergeCells(`A${totalRowIndex}:C${totalRowIndex}`);
-    const totalLabelCell = totalRow.getCell(1);
-    totalLabelCell.value = 'TOTAL';
-    totalLabelCell.alignment = { horizontal: 'right', vertical: 'middle' };
-    totalLabelCell.font = { bold: true, size: 12 };
+    signaturesObj.getCell(1).value = 'Signature of Claimant';
+    signaturesObj.getCell(1).font = { bold: true };
+    signaturesObj.getCell(5).value = 'Department Head/Manager';
+    signaturesObj.getCell(5).font = { bold: true };
     
-    // Add formula for total amount
-    const totalAmountCell = totalRow.getCell(4);
-    totalAmountCell.value = { formula: `SUM(D7:D${rowIndex-1})` };
-    totalAmountCell.numFmt = '$#,##0.00';
-    totalAmountCell.font = { bold: true };
+    signaturesObj.getCell(7).border = {
+      right: { style: 'medium' }
+    };
     
-    // Add formula for total tax
-    const totalTaxCell = totalRow.getCell(5);
-    totalTaxCell.value = { formula: `SUM(E7:E${rowIndex-1})` };
-    totalTaxCell.numFmt = '$#,##0.00';
-    totalTaxCell.font = { bold: true };
+    // Increase signature row height (line for actual signature)
+    worksheet.getRow(signatureRow+1).height = 60; // Increased for signature
     
-    // Style the total row
-    totalRow.eachCell((cell) => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'E6E6E6' } // Light gray background
-      };
-      cell.border = {
-        top: { style: 'medium' },
-        left: { style: 'thin' },
-        bottom: { style: 'double' },
-        right: { style: 'thin' }
-      };
-    });
+    worksheet.getRow(signatureRow+1).getCell(1).border = {
+      bottom: { style: 'thin' },
+      left: { style: 'medium' }
+    };
+    worksheet.getRow(signatureRow+1).getCell(2).border = {
+      bottom: { style: 'thin' }
+    };
     
-    // Add signature section
-    const signatureRow = totalRowIndex + 3;
-    worksheet.mergeCells(`A${signatureRow}:C${signatureRow}`);
-    const signatureCell = worksheet.getCell(`A${signatureRow}`);
-    signatureCell.value = 'Signature of Claimant';
-    signatureCell.font = { bold: true, size: 11 };
-    signatureCell.alignment = { horizontal: 'left' };
-    
-    // Add a line for the signature
-    ['A', 'B', 'C'].forEach(col => {
-      worksheet.getCell(`${col}${signatureRow+1}`).border = {
-        top: { style: 'thin' }
-      };
-    });
-    
-    worksheet.mergeCells(`D${signatureRow}:F${signatureRow}`);
-    const managerCell = worksheet.getCell(`D${signatureRow}`);
-    managerCell.value = 'Department Head/Manager';
-    managerCell.font = { bold: true, size: 11 };
-    managerCell.alignment = { horizontal: 'left' };
-    
-    // Add a line for the manager signature
-    ['D', 'E', 'F'].forEach(col => {
-      worksheet.getCell(`${col}${signatureRow+1}`).border = {
-        top: { style: 'thin' }
-      };
-    });
-    
-    // Generate a temporary file path
-    const tempFilePath = path.join(__dirname, 'uploads', `expense_report_${Date.now()}.xlsx`);
-    
-    // Write to file
-    await workbook.xlsx.writeFile(tempFilePath);
-    
-    // Send file as download
-    res.download(tempFilePath, 'Greenwin_Expense_Report.xlsx', (err) => {
-      // Delete the temp file after download
-      if (fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
+    // Add digital signature if provided
+    if (signature) {
+      try {
+        console.log('Signature data received on server side');
+        
+        // Extract the base64 data from the signature string
+        const signatureParts = signature.split(',');
+        console.log('Signature format:', signatureParts[0]);
+        
+        const base64Data = signatureParts[1];
+        if (base64Data) {
+          console.log('Base64 data length:', base64Data.length);
+          console.log('Base64 data starts with:', base64Data.substring(0, 30) + '...');
+          
+          // Save the image to a temporary file
+          const tempImgPath = path.join(__dirname, 'temp_signature.png');
+          const imgBuffer = Buffer.from(base64Data, 'base64');
+          fs.writeFileSync(tempImgPath, imgBuffer);
+          
+          console.log('Signature saved to temporary file');
+          
+          try {
+            // Create an image
+            const signatureImage = workbook.addImage({
+              filename: tempImgPath,
+              extension: 'png',
+            });
+            
+            console.log('Image created in workbook from file');
+            
+            // Add image to the worksheet at the signature position
+            worksheet.addImage(signatureImage, {
+              tl: { col: 0, row: signatureRow + 0.2 },
+              br: { col: 2.5, row: signatureRow + 1.8 },
+              editAs: 'oneCell'
+            });
+            
+            // Log success message for debugging
+            console.log('Signature added to Excel file successfully');
+            
+            // DO NOT delete the temp file here - we'll delete it after the Excel is generated
+          } catch (imgError) {
+            console.error('Error creating image from file:', imgError);
+          }
+        } else {
+          console.log('No base64 data found in signature string');
+        }
+      } catch (signatureError) {
+        console.error('Error adding signature to Excel:', signatureError);
+        // Continue with export even if signature fails
       }
-      
-      if (err) {
-        console.error('Error downloading file:', err);
+    } else {
+      console.log('No signature data provided for Excel export');
+    }
+    
+    worksheet.getRow(signatureRow+1).getCell(5).border = {
+      bottom: { style: 'thin' }
+    };
+    worksheet.getRow(signatureRow+1).getCell(6).border = {
+      bottom: { style: 'thin' }
+    };
+    worksheet.getRow(signatureRow+1).getCell(7).border = {
+      bottom: { style: 'thin' },
+      right: { style: 'medium' }
+    };
+    
+    // Add additional blank space row below signatures
+    const spacerRow = signatureRow + 2;
+    worksheet.getRow(spacerRow).height = 20; // Extra space
+    worksheet.getRow(spacerRow).getCell(1).border = {
+      left: { style: 'medium' }
+    };
+    worksheet.getRow(spacerRow).getCell(7).border = {
+      right: { style: 'medium' }
+    };
+    
+    // Close the bottom of the sheet
+    const finalRow = signatureRow + 3; // Moved down by 1 to account for the spacer row
+    worksheet.getRow(finalRow).getCell(1).border = {
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    worksheet.getRow(finalRow).getCell(7).border = {
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    worksheet.mergeCells(`A${finalRow}:G${finalRow}`);
+    
+    // Generate Excel file
+    const buffer = await workbook.xlsx.writeBuffer();
+    
+    // Clean up the temporary signature file if it exists
+    const tempImgPath = path.join(__dirname, 'temp_signature.png');
+    if (fs.existsSync(tempImgPath)) {
+      try {
+        fs.unlinkSync(tempImgPath);
+        console.log('Temporary signature file removed after Excel generation');
+      } catch (cleanupError) {
+        console.error('Error removing temporary file:', cleanupError);
       }
-    });
+    }
+    
+    // Send the file to the client
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=Expense_Report.xlsx');
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+    
   } catch (error) {
-    console.error('Error generating Excel export:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Error generating Excel export'
-    });
+    console.error('Error generating Excel report:', error);
+    res.status(500).json({ success: false, error: 'Failed to generate Excel report' });
   }
 });
 
@@ -746,6 +1406,224 @@ app.get('/api/export-pdf', async (req, res) => {
         console.error('Error merging PDFs:', error);
         res.status(500).json({ error: 'Error merging PDFs' });
     }
+});
+
+// Export to Excel and PDF for email
+app.post('/api/export-email', async (req, res) => {
+  try {
+    const { expenses, sessionId } = req.body;
+    
+    if (!expenses || !Array.isArray(expenses) || expenses.length === 0) {
+      return res.status(400).json({ success: false, error: 'No expense data provided' });
+    }
+    
+    // Paths for the temporary files
+    const timestamp = Date.now();
+    const excelPath = `/temp/Greenwin_Expense_Report_${timestamp}.xlsx`;
+    const pdfPath = `/temp/Greenwin_Expense_PDF_${timestamp}.pdf`;
+    
+    // Make sure the temp directory exists
+    if (!fs.existsSync(path.join(__dirname, 'public/temp'))) {
+      fs.mkdirSync(path.join(__dirname, 'public/temp'), { recursive: true });
+    }
+    
+    // Create a new Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Greenwin Corp Expense Report App';
+    workbook.created = new Date();
+    
+    // Add a worksheet with properties
+    const worksheet = workbook.addWorksheet('Expense Report', {
+      properties: {
+        defaultRowHeight: 18
+      }
+    });
+    
+    // Set column widths
+    worksheet.columns = [
+      { width: 17 }, // A - DATE
+      { width: 40 }, // B - DESCRIPTION (increased for longer descriptions)
+      { width: 17 }, // C - Office & General
+      { width: 17 }, // D - Membership
+      { width: 17 }, // E - Subscriptions
+      { width: 17 }, // F - Education & Development
+      { width: 17 }, // G - Mileage/ETR
+    ];
+    
+    // -- HEADER SECTION --
+    
+    // Top section - Name and Date Submitted
+    const nameCell = worksheet.getCell('A1');
+    nameCell.value = 'Name:';
+    nameCell.font = { bold: true };
+    nameCell.border = {
+      top: { style: 'medium' },
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // Cell for name input
+    worksheet.mergeCells('B1:C1');
+    const nameInputCell = worksheet.getCell('B1');
+    nameInputCell.border = {
+      top: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // Date submitted
+    const dateCell = worksheet.getCell('D1');
+    dateCell.value = 'Date Submitted:';
+    dateCell.font = { bold: true };
+    dateCell.border = {
+      top: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // Date field
+    worksheet.mergeCells('E1:G1');
+    const dateFieldCell = worksheet.getCell('E1');
+    dateFieldCell.value = new Date().toLocaleDateString();
+    dateFieldCell.border = {
+      top: { style: 'medium' },
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // Second row - Division
+    const divisionCell = worksheet.getCell('A2');
+    divisionCell.value = 'Division to be charged:';
+    divisionCell.font = { bold: true };
+    divisionCell.border = {
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // Division field
+    worksheet.mergeCells('B2:C2');
+    const divisionFieldCell = worksheet.getCell('B2');
+    divisionFieldCell.border = {
+      bottom: { style: 'medium' }
+    };
+    
+    // Team number
+    const teamCell = worksheet.getCell('D2');
+    teamCell.value = 'Team #:';
+    teamCell.font = { bold: true };
+    teamCell.border = {
+      bottom: { style: 'medium' }
+    };
+    
+    // Team field
+    const teamFieldCell = worksheet.getCell('E2');
+    teamFieldCell.border = {
+      bottom: { style: 'medium' }
+    };
+    
+    // Building number
+    const buildingCell = worksheet.getCell('F2');
+    buildingCell.value = 'BLDG#:';
+    buildingCell.font = { bold: true };
+    buildingCell.border = {
+      bottom: { style: 'medium' }
+    };
+    
+    // Building field
+    const buildingFieldCell = worksheet.getCell('G2');
+    buildingFieldCell.border = {
+      bottom: { style: 'medium' },
+      right: { style: 'medium' }
+    };
+    
+    // -- PROMOTION EXPENSES SECTION --
+    
+    const promoRow = 5;
+    
+    // Promotion Expenses Header
+    worksheet.mergeCells(`A${promoRow}:B${promoRow}`);
+    const promoHeaderCell = worksheet.getCell(`A${promoRow}`);
+    promoHeaderCell.value = 'PROMOTION EXPENSES';
+    promoHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    promoHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
+    promoHeaderCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: '00A651' } // Green background
+    };
+    promoHeaderCell.border = {
+      left: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // G/L Allocation Header for Promotion
+    worksheet.mergeCells(`C${promoRow}:G${promoRow}`);
+    const promoGlHeaderCell = worksheet.getCell(`C${promoRow}`);
+    promoGlHeaderCell.value = 'G/L ALLOCATION';
+    promoGlHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    promoGlHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
+    promoGlHeaderCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: '00A651' } // Green background
+    };
+    promoGlHeaderCell.border = {
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
+    };
+    
+    // Continue with the rest of the Excel formatting...
+    // ... (all the code from the regular Excel export for promotion expenses, 
+    // other expenses, signature section, etc would go here)
+    
+    // Generate and save the Excel file
+    await workbook.xlsx.writeFile(path.join(__dirname, 'public', excelPath));
+    
+    // Generate PDF if sessionId exists
+    let pdfFilePath = null;
+    if (sessionId) {
+      // Find all PDFs for this session
+      const sessionDir = path.join(__dirname, 'uploads', sessionId);
+      let pdfFiles = [];
+      
+      if (fs.existsSync(sessionDir)) {
+        pdfFiles = fs.readdirSync(sessionDir)
+          .filter(file => file.endsWith('.pdf'))
+          .map(file => path.join(sessionDir, file));
+      }
+      
+      if (pdfFiles.length > 0) {
+        try {
+          // Merge PDFs
+          const pdfDoc = await PDFDocument.create();
+          
+          for (const pdfFile of pdfFiles) {
+            const fileData = await fs.promises.readFile(pdfFile);
+            const pdfToMerge = await PDFDocument.load(fileData);
+            const copiedPages = await pdfDoc.copyPages(pdfToMerge, pdfToMerge.getPageIndices());
+            copiedPages.forEach(page => pdfDoc.addPage(page));
+          }
+          
+          // Save the merged PDF
+          const pdfBytes = await pdfDoc.save();
+          fs.writeFileSync(path.join(__dirname, 'public', pdfPath), pdfBytes);
+          pdfFilePath = pdfPath;
+        } catch (pdfError) {
+          console.error('Error merging PDFs:', pdfError);
+          // Continue with just the Excel file if there's an error
+        }
+      }
+    }
+    
+    // Return the file paths for the email client
+    res.json({
+      success: true,
+      excelPath: excelPath,
+      pdfPath: pdfFilePath || ''
+    });
+    
+  } catch (error) {
+    console.error('Error generating files for email:', error);
+    res.status(500).json({ success: false, error: 'Failed to generate files for email' });
+  }
 });
 
 // Send all other requests to the frontend

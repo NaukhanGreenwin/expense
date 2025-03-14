@@ -47,6 +47,7 @@
                         </div>
                     </div>
                     <div class="form-group">
+                        <label for="pdf-file">Upload PDFs (Maximum 50 files)</label>
                         <input type="file" id="pdf-file" name="pdfFiles" accept="application/pdf" multiple>
                     </div>
                     <button type="submit" class="btn-primary">
@@ -69,12 +70,20 @@
                         <input type="text" id="expense-search" placeholder="Search expenses...">
                     </div>
                     
+                    <button id="add-expense-btn" class="btn-primary">
+                        <i class="fas fa-plus-circle"></i> Add an Expense
+                    </button>
+                    
                     <button id="export-excel-btn" class="btn-secondary">
                         <i class="fas fa-file-excel"></i> Export to Excel
                     </button>
                     
                     <button id="export-pdf-btn" class="btn-secondary">
-                        <i class="fas fa-file-pdf"></i> Export to PDF Invoices
+                        <i class="fas fa-file-pdf"></i> Export to PDF
+                    </button>
+                    
+                    <button id="reset-all-btn" class="btn-danger">
+                        <i class="fas fa-trash-alt"></i> Reset All
                     </button>
                 </div>
             </div>
@@ -99,6 +108,72 @@
                         <!-- Expenses will be dynamically added here -->
                     </tbody>
                 </table>
+            </div>
+        </section>
+        
+        <!-- Digital Signature Section -->
+        <section class="signature-section apple-style">
+            <div class="signature-header">
+                <h2><i class="fas fa-signature"></i> Digital Signature</h2>
+                <p>Your signature will appear in Excel exports</p>
+            </div>
+            
+            <div class="signature-container">
+                <div class="signature-tabs">
+                    <button id="draw-tab" class="signature-tab active">Draw Signature</button>
+                    <button id="upload-tab" class="signature-tab">Upload Signature</button>
+                </div>
+                
+                <div id="draw-signature-panel" class="signature-panel active">
+                    <div class="canvas-container">
+                        <canvas id="signature-canvas" width="600" height="200"></canvas>
+                        <div class="signature-instructions">
+                            <i class="fas fa-pen"></i> Sign here
+                        </div>
+                    </div>
+                    <div class="signature-actions">
+                        <button id="clear-signature" class="btn-secondary">
+                            <i class="fas fa-eraser"></i> Clear
+                        </button>
+                        <button id="save-drawn-signature" class="btn-primary apple-button">
+                            <i class="fas fa-save"></i> Save Signature
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="upload-signature-panel" class="signature-panel">
+                    <div class="upload-signature-container">
+                        <div class="form-group">
+                            <label for="signature-upload" class="upload-label">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <span>Upload signature image</span>
+                                <span class="upload-hint">PNG or JPG format</span>
+                            </label>
+                            <input type="file" id="signature-upload" accept="image/png, image/jpeg">
+                        </div>
+                        <div id="signature-preview-container" style="display: none;">
+                            <p>Preview:</p>
+                            <img id="signature-preview" src="" alt="Signature preview">
+                        </div>
+                        <div class="signature-actions">
+                            <button id="save-uploaded-signature" class="btn-primary apple-button">
+                                <i class="fas fa-save"></i> Save Signature
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="current-signature-container" style="display: none;">
+                    <div class="current-signature-header">
+                        <h3>Your Current Signature</h3>
+                        <button id="change-signature" class="btn-secondary apple-secondary-button">
+                            <i class="fas fa-pencil"></i> Change
+                        </button>
+                    </div>
+                    <div class="current-signature-wrapper">
+                        <img id="current-signature" src="" alt="Current signature">
+                    </div>
+                </div>
             </div>
         </section>
     </main>
