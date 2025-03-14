@@ -2319,4 +2319,66 @@ function resetAllData() {
     }
 }
 
+// Handle file input change to update the selected files display
+const fileInput = document.getElementById('pdf-file');
+const selectedFilesContainer = document.querySelector('.selected-files');
+const selectedFilesText = document.querySelector('.files-text');
+
+if (fileInput) {
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) {
+            selectedFilesContainer.style.display = 'flex';
+            if (this.files.length === 1) {
+                selectedFilesText.innerHTML = `<span class="files-count">1</span> file selected: ${this.files[0].name}`;
+            } else {
+                selectedFilesText.innerHTML = `<span class="files-count">${this.files.length}</span> files selected`;
+            }
+        } else {
+            selectedFilesContainer.style.display = 'none';
+            selectedFilesText.textContent = 'No files selected';
+        }
+    });
+}
+
+// Add drag and drop functionality
+const uploadArea = document.querySelector('.upload-area');
+if (uploadArea && fileInput) {
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    ['dragenter', 'dragover'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, highlight, false);
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, unhighlight, false);
+    });
+    
+    function highlight() {
+        uploadArea.classList.add('highlight');
+    }
+    
+    function unhighlight() {
+        uploadArea.classList.remove('highlight');
+    }
+    
+    uploadArea.addEventListener('drop', handleDrop, false);
+    
+    function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        fileInput.files = files;
+        
+        // Trigger change event manually
+        const event = new Event('change');
+        fileInput.dispatchEvent(event);
+    }
+}
+
 // ... existing code ... 
