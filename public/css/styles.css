@@ -351,8 +351,9 @@ table {
 }
 
 th, td {
-    padding: 1rem;
-    text-align: left;
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
 }
 
 th {
@@ -680,12 +681,53 @@ footer a:hover {
 }
 
 .expense-description {
+    margin-top: 5px;
+    color: var(--dark-color);
     font-size: 0.9rem;
-    color: var(--secondary-color);
-    margin-top: 0.5rem;
     line-height: 1.4;
     white-space: normal;
     word-wrap: break-word;
+}
+
+.expense-split-summary {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+    border-left: 3px solid #0071e3;
+    font-size: 0.85rem;
+}
+
+.split-detail {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed rgba(0, 0, 0, 0.1);
+}
+
+.split-detail:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.split-detail.primary {
+    font-weight: 500;
+    color: #0071e3;
+}
+
+.split-label {
+    color: var(--dark-color);
+}
+
+.split-value {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+
+.split-indicator {
+    margin-top: 8px;
 }
 
 .expense-meta {
@@ -1175,36 +1217,31 @@ select.gl-dropdown {
 }
 
 /* Column width specifications */
-#expenses-table th:nth-child(1), 
-#expenses-table td:nth-child(1) {
-    width: 10%; /* Date column */
+#expenses-table th:nth-child(1) {
+    width: 100px; /* Date */
 }
 
-#expenses-table th:nth-child(2), 
-#expenses-table td:nth-child(2) {
-    width: 30%; /* Merchant/Title column */
+#expenses-table th:nth-child(2) {
+    width: 200px; /* Merchant */
 }
 
-#expenses-table th:nth-child(3), 
-#expenses-table td:nth-child(3) {
-    width: 12%; /* Amount column */
+#expenses-table th:nth-child(3),
+#expenses-table th:nth-child(4) {
+    width: 100px; /* Amount, Tax */
     text-align: right;
 }
 
-#expenses-table th:nth-child(4), 
-#expenses-table td:nth-child(4) {
-    width: 12%; /* Tax column */
-    text-align: right;
+#expenses-table th:nth-child(5) {
+    width: 160px; /* G/L Code */
 }
 
-#expenses-table th:nth-child(5), 
-#expenses-table td:nth-child(5) {
-    width: 25%; /* G/L Code column */
+#expenses-table th:nth-child(6) {
+    width: 200px; /* Location */
 }
 
-#expenses-table th:nth-child(6), 
-#expenses-table td:nth-child(6) {
-    width: 11%; /* Actions column */
+#expenses-table th:nth-child(7) {
+    width: 100px; /* Actions */
+    text-align: center;
 }
 
 /* Ensure merchant descriptions don't expand too much */
@@ -1217,9 +1254,9 @@ select.gl-dropdown {
 }
 
 .expense-description {
+    margin-top: 5px;
+    color: var(--dark-color);
     font-size: 0.9rem;
-    color: var(--secondary-color);
-    margin-top: 0.5rem;
     line-height: 1.4;
     white-space: normal;
     word-wrap: break-word;
@@ -1229,9 +1266,6 @@ select.gl-dropdown {
 #expenses-table td:nth-child(3),
 #expenses-table td:nth-child(4) {
     text-align: right;
-    padding-right: 20px;
-    font-variant-numeric: tabular-nums;
-    font-weight: 500;
 }
 
 /* Header */
@@ -1863,4 +1897,257 @@ header.minimal-header {
     background-color: var(--travel-hover);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(156, 39, 176, 0.2);
+}
+
+/* Location Input */
+.location-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.location-input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+    outline: none;
+}
+
+/* Table header alignment fixes */
+#expenses-table th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--dark-color);
+    background-color: var(--light-color);
+    white-space: nowrap;
+}
+
+/* Ensure action buttons are visible */
+.action-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.btn-edit, .btn-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Split Expense Styles */
+.split-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.split-info {
+    font-size: 0.9rem;
+    color: var(--secondary-color);
+    margin-bottom: 15px;
+    font-style: italic;
+}
+
+.btn-add-split {
+    background-color: #f5f5f7;
+    color: var(--primary-color);
+    border: 1px solid rgba(0, 113, 227, 0.3);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-add-split:hover {
+    background-color: rgba(0, 113, 227, 0.1);
+    transform: translateY(-1px);
+}
+
+.btn-add-split:active {
+    transform: translateY(0);
+}
+
+.split-row {
+    margin-bottom: 15px;
+    background-color: #fafafa;
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.split-row-content {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(200px, 1fr) 50px;
+    gap: 15px;
+    align-items: center;
+}
+
+.split-gl-select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 14px;
+    background-color: white;
+}
+
+.split-custom-gl {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 14px;
+}
+
+.split-amount-inputs {
+    display: flex;
+    gap: 10px;
+}
+
+.split-dollar, .split-percent {
+    position: relative;
+    flex: 1;
+}
+
+.dollar-sign {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--secondary-color);
+}
+
+.percent-sign {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--secondary-color);
+}
+
+.split-amount-input {
+    width: 100%;
+    padding: 8px 8px 8px 25px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 14px;
+    text-align: left;
+}
+
+.split-percent-input {
+    width: 100%;
+    padding: 8px 25px 8px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 14px;
+    text-align: right;
+}
+
+.btn-remove-split {
+    background-color: rgba(255, 59, 48, 0.1);
+    color: var(--danger-color);
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-remove-split:hover {
+    background-color: rgba(255, 59, 48, 0.2);
+    transform: scale(1.1);
+}
+
+.split-summary {
+    margin-top: 15px;
+    padding: 12px;
+    border-radius: 8px;
+    background-color: #f5f5f7;
+    border: 1px solid var(--border-color);
+}
+
+.split-totals {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+#split-allocated-amount,
+#split-allocated-percent {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+#split-remaining-amount,
+#split-remaining-percent {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+/* Split indicator in expense list */
+.split-indicator {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+}
+
+.split-badge {
+    background-color: rgba(90, 200, 250, 0.1);
+    color: #0071e3;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.split-details {
+    margin-top: 5px;
+    padding: 8px;
+    border-radius: 6px;
+    background-color: #f5f5f7;
+    font-size: 12px;
+    color: var(--dark-color);
+}
+
+.primary-allocation {
+    margin-bottom: 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px dashed rgba(0, 0, 0, 0.1);
+}
+
+.secondary-allocations {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.split-allocation {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.split-gl-code {
+    font-weight: 600;
+}
+
+.split-amount, .split-percent {
+    font-size: 12px;
 } 

@@ -184,7 +184,8 @@ function openAddExpenseForm() {
         tax: '',
         date: new Date().toISOString().split('T')[0], // Today's date
         glCode: '6408-000', // Default G/L code
-        description: ''
+        description: '',
+        location: '' // Add location field
     };
     
     // Open the edit modal with the blank expense
@@ -212,7 +213,8 @@ function openTravelExpenseForm() {
         description: '',
         fromLocation: '',
         toLocation: '',
-        kilometers: ''
+        kilometers: '',
+        location: '' // Add location field
     };
     
     // Open the edit modal with the blank travel expense
@@ -334,6 +336,29 @@ function createEditModal() {
                     </div>
                 </div>
                 
+                <div class="form-group">
+                    <label for="edit-location">Location</label>
+                    <input type="text" id="edit-location" placeholder="Enter the location">
+                </div>
+                
+                <!-- Split Expense Section -->
+                <div class="form-group" id="split-expense-section">
+                    <div class="split-header">
+                        <label>Split Expense</label>
+                        <button type="button" class="btn-add-split"><i class="fas fa-plus-circle"></i> Add Split</button>
+                    </div>
+                    <div class="split-info">Split this expense across multiple G/L codes. The primary G/L code above will receive the remaining amount.</div>
+                    <div id="split-container">
+                        <!-- Split rows will be added here dynamically -->
+                    </div>
+                    <div id="split-summary" style="display: none;">
+                        <div class="split-totals">
+                            <span>Allocated: <span id="split-allocated-amount">$0.00</span> (<span id="split-allocated-percent">0%</span>)</span>
+                            <span>Remaining: <span id="split-remaining-amount">$0.00</span> (<span id="split-remaining-percent">100%</span>)</span>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Mileage specific fields - hidden by default -->
                 <div id="mileage-fields" style="display: none; margin-top: 10px; padding: 10px; background-color: #f5f5f5; border-radius: 4px;">
                     <h4 style="margin-top: 0; color: #2e7d32;">Mileage Details</h4>
@@ -382,6 +407,16 @@ function createEditModal() {
     cancelBtn.addEventListener('click', closeEditModal);
     form.addEventListener('submit', saveEditedExpense);
     
+    // Add event listener for the Add Split button
+    const addSplitBtn = modal.querySelector('.btn-add-split');
+    if (addSplitBtn) {
+        addSplitBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            addSplitRow();
+            updateSplitTotals();
+        });
+    }
+    
     // Auto-calculate tax when amount changes
     const amountInput = document.getElementById('edit-amount');
     if (amountInput) {
@@ -409,6 +444,9 @@ function createEditModal() {
                 const calculatedAmountDiv = document.getElementById('calculated-amount');
                 calculatedAmountDiv.style.display = 'none';
             }
+            
+            // Update split totals if there are any splits
+            updateSplitTotals();
         });
     }
     
@@ -447,6 +485,7 @@ function openEditModal(expense) {
     document.getElementById('edit-amount').value = expense.amount || 0;
     document.getElementById('edit-tax').value = expense.tax || calculateTax(expense.amount);
     document.getElementById('edit-date').value = expense.date || '';
+    document.getElementById('edit-location').value = expense.location || '';
     
     const glCodeSelect = document.getElementById('edit-gl-code');
     const customGlCodeInput = document.getElementById('edit-custom-gl-code');
@@ -468,6 +507,20 @@ function openEditModal(expense) {
     }
     
     document.getElementById('edit-description').value = expense.description || '';
+    
+    // Handle expense splits if they exist
+    const splitContainer = document.getElementById('split-container');
+    if (splitContainer) {
+        // Clear any existing splits
+        splitContainer.innerHTML = '';
+        
+        // If expense has splits, populate them
+        if (expense.splits && expense.splits.length > 0) {
+            expense.splits.forEach((split, index) => {
+                addSplitRow(split.glCode, split.amount, split.percentage);
+            });
+        }
+    }
     
     // Check for mileage fields and populate them if this is a mileage entry
     const fromLocationInput = document.getElementById('edit-from-location');
@@ -583,8 +636,44 @@ async function saveEditedExpense(event) {
         tax: parseFloat(document.getElementById('edit-tax').value),
         date: document.getElementById('edit-date').value,
         glCode: glCode,
-        description: document.getElementById('edit-description').value
+        description: document.getElementById('edit-description').value,
+        location: document.getElementById('edit-location').value
     };
+    
+    // Handle expense splits
+    const splitContainer = document.getElementById('split-container');
+    if (splitContainer && splitContainer.children.length > 0) {
+        const splits = [];
+        const splitRows = splitContainer.querySelectorAll('.split-row');
+        
+        // Process each split row
+        splitRows.forEach(row => {
+            const glSelect = row.querySelector('.split-gl-select');
+            const customGlInput = row.querySelector('.split-custom-gl');
+            const amountInput = row.querySelector('.split-amount-input');
+            const percentInput = row.querySelector('.split-percent-input');
+            
+            // Get G/L code
+            let splitGlCode = glSelect.value;
+            if (splitGlCode === 'other') {
+                splitGlCode = customGlInput.value.trim();
+            }
+            
+            // Only add if we have a G/L code and amount
+            if (splitGlCode && amountInput.value) {
+                splits.push({
+                    glCode: splitGlCode,
+                    amount: parseFloat(amountInput.value) || 0,
+                    percentage: parseFloat(percentInput.value) || 0
+                });
+            }
+        });
+        
+        // Add splits to the expense object if we have any
+        if (splits.length > 0) {
+            updatedExpense.splits = splits;
+        }
+    }
     
     // Handle mileage specific fields
     if (glCode === '6026-000') {
@@ -994,7 +1083,8 @@ function populateExpenseForm(data) {
         description: extractedData.description || '',
         glCode: extractedData.gl_code || extractedData.glCode || determineGLCode(extractedData.merchant, extractedData.description) || '6408-000',
         name: nameInput.value.trim() || extractedData.name || '',  // Prioritize form input
-        department: departmentInput.value.trim() || extractedData.department || '' // Prioritize form input
+        department: departmentInput.value.trim() || extractedData.department || '', // Prioritize form input
+        location: extractedData.location || '' // Add location field
     };
     
     // Log the expense object for debugging
@@ -1105,8 +1195,33 @@ function renderExpenses() {
         const formattedDate = date.toLocaleDateString();
         
         // Get description
-        const description = expense.description ? 
+        let description = expense.description ? 
             `<div class="expense-description">${expense.description}</div>` : '';
+        
+        // If this is a split expense, show the main split info in the description
+        if (expense.splits && expense.splits.length > 0) {
+            const totalAmount = expense.amount;
+            const totalSplitAmount = expense.splits.reduce((sum, split) => sum + parseFloat(split.amount || 0), 0);
+            const remainingAmount = totalAmount - totalSplitAmount;
+            const remainingPercent = Math.round((remainingAmount / totalAmount) * 100);
+            
+            description += `<div class="expense-split-summary">
+                <div class="split-detail primary">
+                    <span class="split-label">Primary (${expense.glCode}):</span> 
+                    <span class="split-value">$${remainingAmount.toFixed(2)} (${remainingPercent}%)</span>
+                </div>`;
+                
+            // Add each split allocation
+            expense.splits.forEach(split => {
+                description += `
+                <div class="split-detail">
+                    <span class="split-label">${split.glCode}:</span> 
+                    <span class="split-value">$${split.amount.toFixed(2)} (${Math.round(split.percentage)}%)</span>
+                </div>`;
+            });
+            
+            description += '</div>';
+        }
             
         // Display tax amount as static text, similar to the amount field
         const taxDisplay = `<span class="tax-value">$${expense.tax.toFixed(2)}</span>`;
@@ -1126,16 +1241,36 @@ function renderExpenses() {
             </select>
             <input type="text" class="custom-gl-input" data-id="${expense.id}" placeholder="Enter custom G/L code" value="${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? expense.glCode : ''}" style="display: ${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? 'block' : 'none'}; margin-top: 5px; width: 100%;">
         `;
+
+        // Handle split display
+        let splitInfo = '';
+        if (expense.splits && expense.splits.length > 0) {
+            // Calculate remaining amount
+            const totalSplitAmount = expense.splits.reduce((sum, split) => sum + split.amount, 0);
+            const remainingAmount = expense.amount - totalSplitAmount;
+            
+            // Create split info HTML
+            splitInfo = `
+                <div class="split-indicator">
+                    <span class="split-badge"><i class="fas fa-copy"></i> Split</span>
+                </div>
+            `;
+        }
+        
+        // Make location editable
+        const locationInput = `<input type="text" class="location-input" data-id="${expense.id}" value="${expense.location || ''}" placeholder="Enter location">`;
         
         row.innerHTML = `
             <td data-label="Date">${formattedDate}</td>
             <td data-label="Merchant">
                 <div class="merchant-name">${expense.title}</div>
                 ${description}
+                ${splitInfo}
             </td>
             <td data-label="Amount">$${expense.amount.toFixed(2)}</td>
             <td data-label="Tax">${taxDisplay}</td>
             <td data-label="G/L Code">${glCodeDropdown}</td>
+            <td data-label="Location">${locationInput}</td>
             <td data-label="Actions">
                 <div class="action-buttons">
                     <button class="btn-edit" data-id="${expense.id}">
@@ -1167,6 +1302,23 @@ function renderExpenses() {
                 renderExpenses();
                 updateTotalAmount();
                 showNotification('Expense deleted successfully', 'success');
+            }
+        });
+        
+        // Add event listener for location input
+        const locationInputEl = row.querySelector('.location-input');
+        locationInputEl.addEventListener('blur', (e) => {
+            const newLocation = e.target.value.trim();
+            updateExpenseLocation(expense.id, newLocation);
+        });
+        
+        // Handle Enter key for location input
+        locationInputEl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const newLocation = e.target.value.trim();
+                updateExpenseLocation(expense.id, newLocation);
+                e.target.blur();
             }
         });
         
@@ -2522,6 +2674,232 @@ if (uploadArea && fileInput) {
         const event = new Event('change');
         fileInput.dispatchEvent(event);
     }
+}
+
+// Update expense location
+async function updateExpenseLocation(expenseId, newLocation) {
+    try {
+        // Find the expense in our local state
+        const expense = expenses.find(exp => exp.id === expenseId);
+        if (!expense) return;
+        
+        // Update local state first for immediate feedback
+        expense.location = newLocation;
+        
+        // Update the expense on the server
+        const response = await fetch(`/api/expenses/${expenseId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(expense)
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to update expense location');
+        }
+        
+        // No need to re-render, just updating a field
+        showNotification('Location updated successfully', 'success');
+    } catch (error) {
+        console.error('Error updating expense location:', error);
+        showNotification('Failed to update location', 'error');
+        
+        // Revert changes in case of error
+        fetchExpenses();
+    }
+}
+
+// Add a split row to the split container
+function addSplitRow(glCode = '', amount = '', percentage = '') {
+    const splitContainer = document.getElementById('split-container');
+    const splitSummary = document.getElementById('split-summary');
+    
+    if (!splitContainer) return;
+    
+    // Generate a unique ID for this split row
+    const splitId = 'split-' + Date.now();
+    
+    // Create a new split row
+    const splitRow = document.createElement('div');
+    splitRow.className = 'split-row';
+    splitRow.dataset.id = splitId;
+    
+    // Create the HTML for the split row
+    splitRow.innerHTML = `
+        <div class="split-row-content">
+            <div class="split-gl-code">
+                <select class="split-gl-select">
+                    <option value="">Select G/L Code</option>
+                    <option value="6408-000" ${glCode === '6408-000' ? 'selected' : ''}>6408-000 (Office & General)</option>
+                    <option value="6402-000" ${glCode === '6402-000' ? 'selected' : ''}>6402-000 (Membership)</option>
+                    <option value="6404-000" ${glCode === '6404-000' ? 'selected' : ''}>6404-000 (Subscriptions)</option>
+                    <option value="7335-000" ${glCode === '7335-000' ? 'selected' : ''}>7335-000 (Education)</option>
+                    <option value="6010-000" ${glCode === '6010-000' ? 'selected' : ''}>6010-000 (Food & Ent.)</option>
+                    <option value="6011-000" ${glCode === '6011-000' ? 'selected' : ''}>6011-000 (Social)</option>
+                    <option value="6012-000" ${glCode === '6012-000' ? 'selected' : ''}>6012-000 (Travel)</option>
+                    <option value="other">Other</option>
+                </select>
+                <input type="text" class="split-custom-gl" placeholder="Custom G/L code" style="display: none;" value="">
+            </div>
+            <div class="split-amount">
+                <div class="split-amount-inputs">
+                    <div class="split-dollar">
+                        <span class="dollar-sign">$</span>
+                        <input type="number" class="split-amount-input" placeholder="0.00" step="0.01" min="0" value="${amount}">
+                    </div>
+                    <div class="split-percent">
+                        <input type="number" class="split-percent-input" placeholder="0" step="1" min="0" max="100" value="${percentage}">
+                        <span class="percent-sign">%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="split-actions">
+                <button type="button" class="btn-remove-split" data-id="${splitId}"><i class="fas fa-trash"></i></button>
+            </div>
+        </div>
+    `;
+    
+    // Add the split row to the container
+    splitContainer.appendChild(splitRow);
+    
+    // Show the split summary if there's at least one split
+    if (splitContainer.children.length > 0) {
+        splitSummary.style.display = 'block';
+    }
+    
+    // Add event listeners for this split row
+    const removeBtn = splitRow.querySelector('.btn-remove-split');
+    const glSelect = splitRow.querySelector('.split-gl-select');
+    const customGlInput = splitRow.querySelector('.split-custom-gl');
+    const amountInput = splitRow.querySelector('.split-amount-input');
+    const percentInput = splitRow.querySelector('.split-percent-input');
+    
+    // Remove button
+    removeBtn.addEventListener('click', function() {
+        removeSplitRow(splitId);
+    });
+    
+    // G/L code select
+    glSelect.addEventListener('change', function() {
+        if (this.value === 'other') {
+            customGlInput.style.display = 'block';
+            customGlInput.required = true;
+        } else {
+            customGlInput.style.display = 'none';
+            customGlInput.required = false;
+        }
+        updateSplitTotals();
+    });
+    
+    // Amount input
+    amountInput.addEventListener('input', function() {
+        const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
+        const amount = parseFloat(this.value) || 0;
+        
+        // Calculate the percentage
+        if (totalAmount > 0) {
+            const percent = (amount / totalAmount) * 100;
+            percentInput.value = percent.toFixed(0);
+        }
+        
+        updateSplitTotals();
+    });
+    
+    // Percentage input
+    percentInput.addEventListener('input', function() {
+        const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
+        const percent = parseFloat(this.value) || 0;
+        
+        // Calculate the amount
+        if (totalAmount > 0) {
+            const amount = (percent / 100) * totalAmount;
+            amountInput.value = amount.toFixed(2);
+        }
+        
+        updateSplitTotals();
+    });
+    
+    // Set initial values if provided
+    if (glCode && glCode !== '') {
+        if (['6408-000', '6402-000', '6404-000', '7335-000', '6010-000', '6011-000', '6012-000'].includes(glCode)) {
+            glSelect.value = glCode;
+        } else {
+            glSelect.value = 'other';
+            customGlInput.style.display = 'block';
+            customGlInput.value = glCode;
+        }
+    }
+    
+    // Update totals after adding the row
+    updateSplitTotals();
+    
+    return splitRow;
+}
+
+// Remove a split row
+function removeSplitRow(splitId) {
+    const splitRow = document.querySelector(`.split-row[data-id="${splitId}"]`);
+    const splitContainer = document.getElementById('split-container');
+    const splitSummary = document.getElementById('split-summary');
+    
+    if (splitRow && splitContainer) {
+        // Remove the row
+        splitContainer.removeChild(splitRow);
+        
+        // Hide summary if no splits left
+        if (splitContainer.children.length === 0) {
+            splitSummary.style.display = 'none';
+        }
+        
+        // Update totals
+        updateSplitTotals();
+    }
+}
+
+// Update the split totals
+function updateSplitTotals() {
+    const splitContainer = document.getElementById('split-container');
+    const splitAllocatedAmount = document.getElementById('split-allocated-amount');
+    const splitAllocatedPercent = document.getElementById('split-allocated-percent');
+    const splitRemainingAmount = document.getElementById('split-remaining-amount');
+    const splitRemainingPercent = document.getElementById('split-remaining-percent');
+    
+    if (!splitContainer || !splitAllocatedAmount || !splitAllocatedPercent || !splitRemainingAmount || !splitRemainingPercent) {
+        return;
+    }
+    
+    // Get total expense amount
+    const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
+    
+    // Calculate allocated amount from all splits
+    let allocatedAmount = 0;
+    
+    // Loop through all split rows
+    const splitRows = splitContainer.querySelectorAll('.split-row');
+    splitRows.forEach(row => {
+        const amountInput = row.querySelector('.split-amount-input');
+        const amount = parseFloat(amountInput.value) || 0;
+        allocatedAmount += amount;
+    });
+    
+    // Ensure allocated amount doesn't exceed total
+    if (allocatedAmount > totalAmount) {
+        allocatedAmount = totalAmount;
+    }
+    
+    // Calculate remaining amount
+    const remainingAmount = totalAmount - allocatedAmount;
+    
+    // Calculate percentages
+    const allocatedPercent = totalAmount > 0 ? (allocatedAmount / totalAmount) * 100 : 0;
+    const remainingPercent = totalAmount > 0 ? (remainingAmount / totalAmount) * 100 : 0;
+    
+    // Update the summary display
+    splitAllocatedAmount.textContent = `$${allocatedAmount.toFixed(2)}`;
+    splitAllocatedPercent.textContent = `${allocatedPercent.toFixed(0)}%`;
+    splitRemainingAmount.textContent = `$${remainingAmount.toFixed(2)}`;
+    splitRemainingPercent.textContent = `${remainingPercent.toFixed(0)}%`;
 }
 
 // ... existing code ... 

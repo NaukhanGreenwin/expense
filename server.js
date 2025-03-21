@@ -203,46 +203,158 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                     messages: [
                         {
                             role: "system", 
-                            content: `You are an AI assistant trained to extract and categorize expense information from receipts and invoices for Greenwin Corp. Extract the following details in a structured format: 
-                            - date (YYYY-MM-DD)
-                            - merchant/vendor name
-                            - total amount
-                            - tax amount (specifically look for HST, GST, or other Canadian taxes listed on the receipt)
-                            - description of purchase (brief summary of what was purchased)
-                            - any itemized expenses with their individual amounts (if available)
+                            content: `You are an AI assistant specialized in extracting and categorizing expense information from receipts and invoices for Greenwin Corp. Your task is to analyze the provided document and extract key expense details with high accuracy.
 
-                            IMPORTANT: For Canadian receipts and invoices, carefully extract the actual HST/tax amount shown on the receipt. If the HST (13%) is explicitly listed, extract this exact value. Do not calculate or estimate this value - only provide the exact tax amount shown on the receipt.
-
-                            Assign the most appropriate G/L allocation code from this list:
-                            - 6408-000 (Office & General): For office supplies, general equipment, administrative expenses
-                            - 6402-000 (Membership): For professional memberships, dues, associations
-                            - 6404-000 (Subscriptions): For software subscriptions, publications, online services
-                            - 7335-000 (Education & Development): For training, courses, professional development
-                            - 6026-000 (Mileage/ETR): For mileage reimbursements and toll expenses
-                            - 6010-000 (Food & Entertainment): For meals, catering, food-related expenses
-                            - 6011-000 (Social): For company events, team activities, celebrations
-                            - 6012-000 (Travel Expenses): For flights, hotels, taxis, and other travel costs (excluding mileage)
-
-                            Be very precise in your G/L code selections based on the merchant and items purchased. For example:
-                            - Restaurant receipts → G/L Code: 6010-000 (Food & Entertainment)
-                            - Zoom subscription → G/L Code: 6404-000 (Subscriptions)
-                            - Conference registration → G/L Code: 7335-000 (Education & Development)
-                            - Office supplies → G/L Code: 6408-000 (Office & General)
-
-                            Format the response as JSON with these exact field names: date, merchant, amount, tax, description, gl_code, line_items (array of objects with name and amount).
+                            REQUIRED FIELDS (all must be present):
+                            - date: Extract in YYYY-MM-DD format. If only month/day are shown, use the current year.
+                            - merchant: The vendor/company name from the receipt
+                            - amount: Total amount including tax (as a number)
+                            - tax: HST/GST amount if explicitly shown (as a number)
+                            - description: Brief summary of purchased items/services
+                            - gl_code: Most appropriate G/L code from the provided list
                             
-                            If the tax amount is not explicitly stated on the receipt, do not include a tax field in your response.`
+                            OPTIONAL FIELDS (include if found):
+                            - location: Store location, branch, city, or address where the purchase was made
+                            - line_items: Detailed list of purchased items with amounts
+
+                            G/L CODE SELECTION RULES:
+                            6408-000 (Office & General):
+                            - Office supplies, equipment, furniture
+                            - Administrative expenses
+                            - General business supplies
+                            - Cleaning supplies
+                            - Printer supplies
+
+                            6402-000 (Membership):
+                            - Professional association fees
+                            - Industry memberships
+                            - Chamber of commerce
+                            - Trade organization dues
+
+                            6404-000 (Subscriptions):
+                            - Software licenses
+                            - Cloud services
+                            - Digital subscriptions
+                            - Online tools
+                            - Microsoft/Adobe products
+                            - Zoom/Teams subscriptions
+
+                            7335-000 (Education & Development):
+                            - Training courses
+                            - Professional certifications
+                            - Workshops
+                            - Conferences
+                            - Educational materials
+                            - Skill development programs
+
+                            6026-000 (Mileage/ETR):
+                            - Vehicle mileage
+                            - Toll fees
+                            - Parking fees
+                            - Public transit
+                            - Vehicle maintenance
+
+                            6010-000 (Food & Entertainment):
+                            - Business meals
+                            - Client lunches/dinners
+                            - Coffee meetings
+                            - Catering
+                            - Restaurant expenses
+                            - Food for meetings
+
+                            6011-000 (Social):
+                            - Team building events
+                            - Company celebrations
+                            - Holiday parties
+                            - Employee events
+                            - Team activities
+
+                            6012-000 (Travel Expenses):
+                            - Airfare
+                            - Hotels
+                            - Taxis/Uber/Lyft
+                            - Car rentals
+                            - Travel insurance
+                            - Baggage fees
+
+                            IMPORTANT RULES:
+                            1. For Canadian receipts, carefully extract the exact HST/GST amount shown
+                            2. If tax amount is not explicitly shown, omit the tax field
+                            3. For dates with only month/day, use the current year
+                            4. For merchant names, use the official business name shown
+                            5. For descriptions, be concise but include key items/services
+                            6. Always assign the most specific G/L code possible
+                            7. If unsure about a G/L code, default to 6408-000 (Office & General)
+
+                            Format your response as a JSON object with these exact field names:
+                            {
+                                "date": "YYYY-MM-DD",
+                                "merchant": "string",
+                                "amount": number,
+                                "tax": number (optional),
+                                "description": "string",
+                                "gl_code": "string",
+                                "location": "string" (optional),
+                                "line_items": [
+                                    {
+                                        "name": "string",
+                                        "amount": number
+                                    }
+                                ]
+                            }`
                         },
                         {
                             role: "user",
                             content: `Extract detailed expense information from this document in the exact JSON format specified: ${pdfText}`
                         }
                     ],
-                    response_format: { type: "json_object" }
+                    response_format: { type: "json_object" },
+                    temperature: 0.3, // Lower temperature for more consistent results
+                    max_tokens: 1000 // Increased for detailed responses
                 });
                 
-                // Parse OpenAI response
-                const parsedData = JSON.parse(openaiResponse.choices[0].message.content);
+                // Parse OpenAI response with error handling
+                let parsedData;
+                try {
+                    parsedData = JSON.parse(openaiResponse.choices[0].message.content);
+                    
+                    // Validate required fields
+                    const requiredFields = ['date', 'merchant', 'amount', 'description', 'gl_code'];
+                    const missingFields = requiredFields.filter(field => !parsedData[field]);
+                    
+                    if (missingFields.length > 0) {
+                        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+                    }
+                    
+                    // Clean and validate data
+                    parsedData.amount = parseFloat(parsedData.amount.toString().replace(/[^0-9.]/g, ''));
+                    if (isNaN(parsedData.amount)) {
+                        throw new Error('Invalid amount format');
+                    }
+                    
+                    if (parsedData.tax) {
+                        parsedData.tax = parseFloat(parsedData.tax.toString().replace(/[^0-9.]/g, ''));
+                        if (isNaN(parsedData.tax)) {
+                            delete parsedData.tax; // Remove invalid tax amount
+                        }
+                    }
+                    
+                    // Validate date format
+                    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+                    if (!dateRegex.test(parsedData.date)) {
+                        throw new Error('Invalid date format');
+                    }
+                    
+                    // Validate G/L code format
+                    const glCodeRegex = /^\d{4}-\d{3}$/;
+                    if (!glCodeRegex.test(parsedData.gl_code)) {
+                        throw new Error('Invalid G/L code format');
+                    }
+                    
+                } catch (parseError) {
+                    console.error('Error parsing OpenAI response:', parseError);
+                    throw new Error(`Failed to parse expense data: ${parseError.message}`);
+                }
                 
                 // Add user name and department to the parsed data
                 parsedData.name = userName;
@@ -658,6 +770,7 @@ app.post('/api/export-excel', async (req, res) => {
         right: { style: 'thin' },
         bottom: { style: 'thin' }
       };
+      row.getCell(2).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
       
       // Amount cells (C-F)
       for (let col = 3; col <= 6; col++) {
@@ -895,100 +1008,190 @@ app.post('/api/export-excel', async (req, res) => {
     
     // Add expense data
     let currentRow = otherRowsStart;
-    Object.entries(expensesByGlCode).forEach(([glCode, groupExpenses]) => {
-      groupExpenses.forEach(expense => {
+    expenses.forEach(expense => {
         const row = worksheet.getRow(currentRow);
         
         // Format date
         let dateValue = expense.date;
         if (typeof dateValue === 'string') {
-          try {
-            const dateObj = new Date(dateValue);
-            if (!isNaN(dateObj.getTime())) {
-              dateValue = dateObj;
+            try {
+                const dateObj = new Date(dateValue);
+                if (!isNaN(dateObj.getTime())) {
+                    dateValue = dateObj;
+                }
+            } catch (e) {
+                console.warn('Could not parse date:', e);
             }
-          } catch (e) {
-            console.warn('Could not parse date:', e);
-          }
         }
         
         // DATE column
         row.getCell(1).value = dateValue;
         row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
         row.getCell(1).border = {
-          left: { style: 'medium' },
-          top: { style: 'thin' },
-          right: { style: 'thin' },
-          bottom: { style: 'thin' }
+            left: { style: 'medium' },
+            top: { style: 'thin' },
+            right: { style: 'thin' },
+            bottom: { style: 'thin' }
         };
         
-        // DESCRIPTION column
-        row.getCell(2).value = expense.description || '';
-        row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-        row.getCell(2).border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          right: { style: 'thin' },
-          bottom: { style: 'thin' }
-        };
-        
-        // Amount in the appropriate column based on G/L code
-        let amountColumn = 0;
-        
-        switch (glCode) {
-          case '6408-000': amountColumn = 3; break; // Office & General
-          case '6402-000': amountColumn = 4; break; // Membership
-          case '6404-000': amountColumn = 5; break; // Subscriptions
-          case '7335-000': amountColumn = 6; break; // Education & Development
-          case '6026-000': amountColumn = 7; break; // Mileage/ETR
-          case '6010-000': amountColumn = 0; break; // Food & Entertainment - in promotion section
-          case '6011-000': amountColumn = 0; break; // Social - in promotion section
-          case '6012-000': amountColumn = 0; break; // Travel - in promotion section
-          default: amountColumn = 3; // Default to Office & General
+        // DESCRIPTION column - include location if available
+        let description = expense.description || '';
+        if (expense.location) {
+            description = `${description}${description ? '\n\n' : ''}Location: ${expense.location}`;
         }
         
-        if (amountColumn > 0) {
-          // Add amount to the appropriate column
-          row.getCell(amountColumn).value = expense.amount;
-          row.getCell(amountColumn).numFmt = '$#,##0.00';
-          row.getCell(amountColumn).alignment = { horizontal: 'right', vertical: 'middle' };
-          row.getCell(amountColumn).border = {
+        // Check if this is a split expense with splits
+        if (expense.splits && expense.splits.length > 0) {
+            // Calculate total amount allocated to splits
+            const totalSplitAmount = expense.splits.reduce((sum, split) => sum + parseFloat(split.amount || 0), 0);
+            const remainingAmount = parseFloat(expense.amount) - totalSplitAmount;
+            const remainingPercent = Math.round((remainingAmount / parseFloat(expense.amount)) * 100);
+            
+            // Start building the split description
+            let splitDescription = `\n\n`;
+            
+            // Add primary G/L allocation if there's a remaining amount
+            if (remainingAmount > 0) {
+                // Get name for G/L code
+                let glName = "Other";
+                switch (expense.glCode) {
+                    case '6408-000': glName = "Office & General"; break;
+                    case '6402-000': glName = "Membership"; break;
+                    case '6404-000': glName = "Subscriptions"; break;
+                    case '7335-000': glName = "Education & Development"; break;
+                    case '6026-000': glName = "Mileage/ETR"; break;
+                    case '6010-000': glName = "Food & Entertainment"; break;
+                    case '6011-000': glName = "Social"; break;
+                    case '6012-000': glName = "Travel"; break;
+                }
+                
+                splitDescription += `Primary (${expense.glCode}): $${remainingAmount.toFixed(2)} (${remainingPercent}%)\n`;
+            }
+            
+            // Add each split allocation on a new line
+            expense.splits.forEach((split, index) => {
+                // Get name for G/L code
+                let glName = "Other";
+                switch (split.glCode) {
+                    case '6408-000': glName = "Office & General"; break;
+                    case '6402-000': glName = "Membership"; break;
+                    case '6404-000': glName = "Subscriptions"; break;
+                    case '7335-000': glName = "Education & Development"; break;
+                    case '6026-000': glName = "Mileage/ETR"; break;
+                    case '6010-000': glName = "Food & Entertainment"; break;
+                    case '6011-000': glName = "Social"; break;
+                    case '6012-000': glName = "Travel"; break;
+                }
+                
+                splitDescription += `${split.glCode}: $${parseFloat(split.amount).toFixed(2)} (${Math.round(parseFloat(split.percentage))}%)\n`;
+            });
+            
+            // Add the split description to the main description
+            description += splitDescription;
+        }
+        
+        row.getCell(2).value = description;
+        row.getCell(2).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+        row.getCell(2).border = {
             top: { style: 'thin' },
             left: { style: 'thin' },
             right: { style: 'thin' },
             bottom: { style: 'thin' }
-          };
-          
-          // Clear other amount columns and add borders
-          for (let col = 3; col <= 7; col++) {
-            if (col !== amountColumn) {
-              row.getCell(col).border = {
-                top: { style: 'thin' },
-                left: { style: 'thin' },
-                right: { style: 'thin' },
-                bottom: { style: 'thin' }
-              };
+        };
+        
+        // Check if this is a split expense
+        let hasPromotionGLCode = false;
+        
+        if (expense.splits && expense.splits.length > 0) {
+            // Check if any split has a promotion G/L code
+            for (const split of expense.splits) {
+                if (['6010-000', '6011-000', '6012-000'].includes(split.glCode)) {
+                    hasPromotionGLCode = true;
+                    break;
+                }
             }
-          }
-          
-          // Ensure right border
-          row.getCell(7).border.right = { style: 'medium' };
-          
-          // Adjust row heights based on content length
-          const descLength = (expense.description || '').length;
-          if (descLength > 100) {
-            row.height = 45; // Extra tall for very long descriptions
-          } else if (descLength > 50) {
-            row.height = 35; // Taller for long descriptions
-          } else if (descLength > 25) {
-            row.height = 25; // Slightly taller for medium descriptions
-          } else {
-            row.height = 21; // Standard height for short descriptions
-          }
-          
-          currentRow++;
+            
+            // Calculate total amount allocated to splits
+            const totalSplitAmount = expense.splits.reduce((sum, split) => sum + parseFloat(split.amount || 0), 0);
+            const remainingAmount = parseFloat(expense.amount) - totalSplitAmount;
+            
+            // First, allocate the remaining amount to the primary G/L code
+            if (remainingAmount > 0) {
+                const primaryGlColumn = getColumnForGlCode(expense.glCode);
+                if (primaryGlColumn > 0) {
+                    row.getCell(primaryGlColumn).value = remainingAmount;
+                    row.getCell(primaryGlColumn).numFmt = '$#,##0.00';
+                    row.getCell(primaryGlColumn).alignment = { horizontal: 'right', vertical: 'middle' };
+                }
+            }
+            
+            // Then allocate each split amount to its respective G/L code
+            expense.splits.forEach(split => {
+                const splitGlColumn = getColumnForGlCode(split.glCode);
+                if (splitGlColumn > 0 && split.amount > 0) {
+                    // If this is the first time we're adding to this column, initialize it
+                    const currentValue = row.getCell(splitGlColumn).value || 0;
+                    row.getCell(splitGlColumn).value = currentValue + parseFloat(split.amount);
+                    row.getCell(splitGlColumn).numFmt = '$#,##0.00';
+                    row.getCell(splitGlColumn).alignment = { horizontal: 'right', vertical: 'middle' };
+                } else if (['6010-000', '6011-000', '6012-000'].includes(split.glCode)) {
+                    // For promotion G/L codes, we need to create a separate row in the promotion section
+                    addPromotionExpense(worksheet, expense, split);
+                }
+            });
+        } else {
+            // Not a split transaction, allocate the full amount to the expense's G/L code
+            const amountColumn = getColumnForGlCode(expense.glCode);
+            if (amountColumn > 0) {
+                row.getCell(amountColumn).value = expense.amount;
+                row.getCell(amountColumn).numFmt = '$#,##0.00';
+                row.getCell(amountColumn).alignment = { horizontal: 'right', vertical: 'middle' };
+            } else if (['6010-000', '6011-000', '6012-000'].includes(expense.glCode)) {
+                // This is a promotion expense, add it to the promotion section
+                hasPromotionGLCode = true;
+            }
         }
-      });
+        
+        // Skip adding to Other Expenses if it's only a promotion expense
+        if (!hasPromotionGLCode || (expense.splits && expense.splits.some(split => !['6010-000', '6011-000', '6012-000'].includes(split.glCode)))) {
+            // Add borders to all cells in the row
+            for (let col = 3; col <= 7; col++) {
+                row.getCell(col).border = {
+                    top: { style: 'thin' },
+                    left: { style: 'thin' },
+                    right: { style: 'thin' },
+                    bottom: { style: 'thin' }
+                };
+            }
+            
+            // Ensure right border
+            row.getCell(7).border.right = { style: 'medium' };
+            
+            // Adjust row heights based on content length
+            const descLength = description.length;
+            const lineBreaks = (description.match(/\n/g) || []).length;
+            const approximateLines = Math.ceil(descLength / 50) + lineBreaks; // Estimate lines based on characters and explicit line breaks
+            
+            // Calculate height based on estimated lines
+            // Each line is approximately 15 points high in Excel
+            let rowHeight = Math.max(24, approximateLines * 18); // Increased minimum height to 24 points and line height to 18 points
+            
+            // Add extra padding for split information
+            if (expense.splits && expense.splits.length > 0) {
+                // Add additional height based on number of splits (each split takes roughly two lines now)
+                rowHeight += (expense.splits.length * 30);
+                // Add extra padding to ensure visibility
+                rowHeight += 15;
+            }
+            
+            // Apply calculated height
+            row.height = rowHeight;
+            
+            // Debug logging for troubleshooting
+            console.log(`Row height calculated: ${rowHeight} for description with ${descLength} chars and ${lineBreaks} line breaks`);
+            
+            currentRow++;
+        }
     });
     
     // Add a few empty rows if not enough expense data
@@ -996,37 +1199,41 @@ app.post('/api/export-excel', async (req, res) => {
     const emptyRowsNeeded = Math.max(0, minRows - (currentRow - otherRowsStart));
     
     for (let i = 0; i < emptyRowsNeeded; i++) {
-      const row = worksheet.getRow(currentRow + i);
-      
-      // Date cell
-      row.getCell(1).border = {
-        left: { style: 'medium' },
-        top: { style: 'thin' },
-        right: { style: 'thin' },
-        bottom: { style: 'thin' }
-      };
-      
-      // Description cell
-      row.getCell(2).border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        right: { style: 'thin' },
-        bottom: { style: 'thin' }
-      };
-      
-      // Amount cells (C-G)
-      for (let col = 3; col <= 7; col++) {
-        row.getCell(col).border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          right: { style: 'thin' },
-          bottom: { style: 'thin' }
+        const row = worksheet.getRow(currentRow + i);
+        
+        // Date cell
+        row.getCell(1).border = {
+            left: { style: 'medium' },
+            top: { style: 'thin' },
+            right: { style: 'thin' },
+            bottom: { style: 'thin' }
         };
-        row.getCell(col).numFmt = '$#,##0.00';
-      }
-      
-      // Ensure right border
-      row.getCell(7).border.right = { style: 'medium' };
+        
+        // Description cell
+        row.getCell(2).border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            right: { style: 'thin' },
+            bottom: { style: 'thin' }
+        };
+        row.getCell(2).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+        
+        // Amount cells (C-G)
+        for (let col = 3; col <= 7; col++) {
+            row.getCell(col).border = {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                right: { style: 'thin' },
+                bottom: { style: 'thin' }
+            };
+            row.getCell(col).numFmt = '$#,##0.00';
+        }
+        
+        // Ensure right border
+        row.getCell(7).border.right = { style: 'medium' };
+        
+        // Set standard row height for empty rows
+        row.height = 24;
     }
     
     // Update current row to account for empty rows added
@@ -1117,13 +1324,13 @@ app.post('/api/export-excel', async (req, res) => {
     
     // Set uniform row height for empty rows
     for (let i = 0; i < promoRows; i++) {
-      worksheet.getRow(promoRowsStart + i).height = 21;
+      worksheet.getRow(promoRowsStart + i).height = 24;
     }
     
     // Set other formatting
     for (let i = 1; i <= grandTotalRow; i++) {
       if (!worksheet.getRow(i).height) {
-        worksheet.getRow(i).height = 21; // Default height for rows without specific height
+        worksheet.getRow(i).height = 24; // Increased default height for better text wrapping
       }
     }
     
@@ -1505,10 +1712,10 @@ app.post('/api/export-email', async (req, res) => {
     };
     
     // Date submitted
-    const dateCell = worksheet.getCell('D1');
-    dateCell.value = 'Date Submitted:';
-    dateCell.font = { bold: true };
-    dateCell.border = {
+    const dateSubmittedCell = worksheet.getCell('D1');
+    dateSubmittedCell.value = 'Date Submitted:';
+    dateSubmittedCell.font = { bold: true };
+    dateSubmittedCell.border = {
       top: { style: 'medium' },
       bottom: { style: 'medium' }
     };
@@ -1676,4 +1883,170 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+});
+
+// Helper function to get the Excel column number for a G/L code
+function getColumnForGlCode(glCode) {
+    // IMPORTANT: These column indexes must match the column structure in the Excel template
+    // For "Other Expenses" section:
+    const OTHER_EXPENSES_COLUMNS = {
+        '6408-000': 3, // Office & General - Column C
+        '6402-000': 4, // Membership - Column D
+        '6404-000': 5, // Subscriptions - Column E
+        '7335-000': 6, // Education & Development - Column F
+        '6026-000': 7  // Mileage/ETR - Column G
+    };
+    
+    // For promotion expenses, return 0 to indicate they should be handled separately
+    // These go in the Promotion Expenses section of the Excel template
+    const PROMOTION_GL_CODES = ['6010-000', '6011-000', '6012-000'];
+    
+    if (PROMOTION_GL_CODES.includes(glCode)) {
+        return 0; // Signal that this is a promotion expense
+    }
+    
+    // Return the column index for the G/L code, or default to Office & General (column 3)
+    return OTHER_EXPENSES_COLUMNS[glCode] || 3;
+}
+
+// Function to add an expense to the promotion section
+function addPromotionExpense(worksheet, expense, split) {
+    try {
+        // IMPORTANT - These are hard-coded Excel column numbers for promotion expenses
+        // These are actual Excel column numbers for the specific layout in our template
+        const PROMOTION_GL_COLUMNS = {
+            'other': 3,           // C column - Other
+            '6010-000': 4,        // D column - Food & Entertainment
+            '6011-000': 5,        // E column - Social
+            '6012-000': 6         // F column - Travel
+        };
+        
+        // Get the promotion section rows from worksheet
+        // Category row is where promotion expense headers are
+        const categoryRow = 9; // Based on Excel template structure
+        // Number of rows available for promotion expenses
+        const promoRows = 10; // Allow up to 10 promotion expenses
+        
+        // Find the promotion section starting row (after the category labels)
+        const promoStartRow = categoryRow + 1;
+        
+        // Find the first empty row in the promotion section
+        let emptyRow = null;
+        for (let i = 0; i < promoRows; i++) {
+            const rowNum = promoStartRow + i;
+            if (!worksheet.getRow(rowNum).getCell(1).value) {
+                emptyRow = rowNum;
+                break;
+            }
+        }
+        
+        // If no empty row found, we can't add the promotion expense
+        if (!emptyRow) {
+            console.warn('No empty rows available for promotion expense');
+            return;
+        }
+        
+        console.log(`Adding promotion expense to row ${emptyRow} for GL code ${split.glCode} with amount ${split.amount}`);
+        
+        const row = worksheet.getRow(emptyRow);
+        
+        // Format date
+        let dateValue = expense.date;
+        if (typeof dateValue === 'string') {
+            try {
+                const dateObj = new Date(dateValue);
+                if (!isNaN(dateObj.getTime())) {
+                    dateValue = dateObj;
+                }
+            } catch (e) {
+                console.warn('Could not parse date:', e);
+            }
+        }
+        
+        // DATE column
+        row.getCell(1).value = dateValue;
+        row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+        row.getCell(1).border = {
+            left: { style: 'medium' },
+            top: { style: 'thin' },
+            right: { style: 'thin' },
+            bottom: { style: 'thin' }
+        };
+        
+        // DESCRIPTION column - include location if available
+        let description = expense.description || '';
+        if (expense.location) {
+            description = `${description}${description ? '\n\n' : ''}Location: ${expense.location}`;
+        }
+        
+        // Add split info to description - specific for promotion expense split
+        description = `${description}${description ? '\n\n' : ''}Split: $${split.amount} (${Math.round(split.percentage)}%) allocated to ${split.glCode}`;
+        
+        row.getCell(2).value = description;
+        
+        // Clear existing values in amount columns
+        for (let col = 3; col <= 6; col++) {
+            row.getCell(col).value = null;
+        }
+        
+        // Determine which column to use based on the G/L code
+        let targetColumn;
+        
+        // Get the column index based on the G/L code
+        if (PROMOTION_GL_COLUMNS[split.glCode] !== undefined) {
+            targetColumn = PROMOTION_GL_COLUMNS[split.glCode];
+        } else {
+            // Default to "Other" column if not a recognized promotion G/L code
+            targetColumn = PROMOTION_GL_COLUMNS['other'];
+        }
+        
+        console.log(`Placing amount ${split.amount} in column index ${targetColumn} for G/L code ${split.glCode}`);
+        
+        // Set the amount in the determined column
+        row.getCell(targetColumn).value = parseFloat(split.amount);
+        row.getCell(targetColumn).numFmt = '$#,##0.00';
+        row.getCell(targetColumn).alignment = { horizontal: 'right', vertical: 'middle' };
+        
+        // Add borders to all cells in the row
+        for (let col = 3; col <= 6; col++) {
+            row.getCell(col).border = {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                right: { style: 'thin' },
+                bottom: { style: 'thin' }
+            };
+        }
+        
+        // Ensure right border
+        row.getCell(7).border = {
+            right: { style: 'medium' }
+        };
+        
+        // Adjust row height based on content length
+        const descLength = description.length;
+        const lineBreaks = (description.match(/\n/g) || []).length;
+        const approximateLines = Math.ceil(descLength / 50) + lineBreaks; // Estimate lines based on characters and explicit line breaks
+        
+        // Calculate height based on estimated lines
+        // Each line is approximately 15 points high in Excel
+        let rowHeight = Math.max(24, approximateLines * 18); // Increased minimum height to 24 points and line height to 18 points
+        
+        // Add extra padding for split information
+        if (expense.splits && expense.splits.length > 0) {
+            // Add additional height based on number of splits (each split takes roughly two lines now)
+            rowHeight += (expense.splits.length * 30);
+            // Add extra padding to ensure visibility
+            rowHeight += 15;
+        }
+        
+        // Apply calculated height
+        row.height = rowHeight;
+        
+        // Debug logging for troubleshooting
+        console.log(`Row height calculated: ${rowHeight} for description with ${descLength} chars and ${lineBreaks} line breaks`);
+        
+        console.log(`Successfully added promotion expense to row ${emptyRow}`);
+    } catch (error) {
+        console.error('Error in addPromotionExpense:', error);
+    }
+} 
