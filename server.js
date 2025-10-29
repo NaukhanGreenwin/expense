@@ -53,6 +53,7 @@ if (!fs.existsSync('uploads')) {
 // Initialize OpenAI with the API key from environment variables
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true,
 });
 
 const app = express();
@@ -187,8 +188,14 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
         const results = [];
         const errors = [];
 
-        // Process each file
-        for (const file of req.files) {
+        // Process files in parallel for maximum speed (batches of 10)
+        const BATCH_SIZE = 10; // Process 10 PDFs simultaneously for faster throughput
+        
+        for (let i = 0; i < req.files.length; i += BATCH_SIZE) {
+            const batch = req.files.slice(i, i + BATCH_SIZE);
+            
+            // Process batch in parallel
+            const batchPromises = batch.map(async (file) => {
             try {
                 // Read PDF file
                 const pdfBuffer = fs.readFileSync(file.path);
@@ -197,13 +204,13 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                 // Extract text content from PDF
                 const pdfText = pdfData.text;
                 
-                // Process with OpenAI API
+                // Process with OpenAI API - Using GPT-4o for maximum intelligence and speed
                 const openaiResponse = await openai.chat.completions.create({
-                    model: "gpt-4-turbo",
+                    model: "gpt-4o",
                     messages: [
                         {
                             role: "system", 
-                            content: `You are an AI assistant specialized in extracting and categorizing expense information from receipts and invoices for Greenwin Corp. Your task is to analyze the provided document and extract key expense details with high accuracy.
+                            content: `You are an advanced AI assistant specialized in extracting and categorizing expense information from receipts and invoices for Greenwin Corp. Analyze documents with precision and intelligence, automatically detecting patterns and context. Your task is to extract key expense details with the highest accuracy possible.
 
                             REQUIRED FIELDS (all must be present):
                             - date: Extract in YYYY-MM-DD format. If only month/day are shown, use the current year.
@@ -214,7 +221,6 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                             - gl_code: Most appropriate G/L code from the provided list
                             
                             OPTIONAL FIELDS (include if found):
-                            - location: Store location, branch, city, or address where the purchase was made
                             - line_items: Detailed list of purchased items with amounts
 
                             G/L CODE SELECTION RULES:
@@ -277,14 +283,20 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                             - Travel insurance
                             - Baggage fees
 
-                            IMPORTANT RULES:
-                            1. For Canadian receipts, carefully extract the exact HST/GST amount shown
-                            2. If tax amount is not explicitly shown, omit the tax field
-                            3. For dates with only month/day, use the current year
-                            4. For merchant names, use the official business name shown
-                            5. For descriptions, be concise but include key items/services
-                            6. Always assign the most specific G/L code possible
-                            7. If unsure about a G/L code, default to 6408-000 (Office & General)
+                            CRITICAL INTELLIGENCE RULES:
+                            1. SMART TAX DETECTION: For Canadian receipts, intelligently identify HST/GST/PST. If not shown, calculate based on regional rates.
+                            2. CONTEXT AWARENESS: Analyze receipt context - restaurant, retail, service, etc. - to improve categorization.
+                            3. DATE INTELLIGENCE: For incomplete dates, infer the most likely year/month based on context.
+                            4. MERCHANT RECOGNITION: Extract official business name and clean up formatting (remove extra spaces, special characters).
+                            5. CONCISE DESCRIPTIONS: Write brief, one-line descriptions (max 8-10 words). Be clear and professional but concise. Focus on:
+                               - Main service/product only
+                               - Key purpose in 5-10 words
+                               - No lists or excessive details
+                               Example: "September Azure cloud services and Veeam backup"
+                               NOT: "Monthly billing for September including Azure Storage, Data Factory, SQL Database, Microsoft Defender, Virtual Machines, Virtual Network, Bandwidth, and Veeam Backup"
+                            6. ADVANCED G/L MATCHING: Use semantic understanding to assign the most accurate G/L code based on merchant type AND items purchased.
+                            7. PATTERN RECOGNITION: Learn from common expense patterns (e.g., coffee shop = Food & Entertainment).
+                            8. CONFIDENCE: Only include fields you're highly confident about. Skip uncertain data rather than guessing.
 
                             Format your response as a JSON object with these exact field names:
                             {
@@ -305,12 +317,17 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                         },
                         {
                             role: "user",
-                            content: `Extract detailed expense information from this document in the exact JSON format specified: ${pdfText}`
+                            content: `Intelligently analyze and extract expense information from this receipt/invoice. Use context clues, pattern recognition, and semantic understanding. 
+                            
+                            CRITICAL: Keep descriptions SHORT - max 8-10 words, one line only. Be concise and professional. Example: "Azure cloud services for September" NOT long lists.
+                            
+                            Return precise, structured data in the exact JSON format specified:\n\n${pdfText}`
                         }
                     ],
                     response_format: { type: "json_object" },
-                    temperature: 0.3, // Lower temperature for more consistent results
-                    max_tokens: 1000 // Increased for detailed responses
+                    temperature: 0.1, // Low for concise, consistent descriptions
+                    max_tokens: 500, // Reduced for short descriptions
+                    top_p: 0.95 // Focus on most likely tokens for faster processing
                 });
                 
                 // Parse OpenAI response with error handling
@@ -374,20 +391,37 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                 sessions.get(sessionId).files.push(file.path);
                 console.log(`PDF file saved at: ${file.path}`);
 
-                // Add filename to the results for reference
-                results.push({
+                // Return the result for this file
+                return {
                     filename: file.originalname,
                     filepath: file.path,
                     data: parsedData
-                });
+                };
                 
             } catch (error) {
                 console.error(`Error processing PDF file ${file.originalname}:`, error);
-                errors.push({
+                return {
+                    error: true,
                     filename: file.originalname,
-                    error: error.message || 'Error processing PDF file'
-                });
+                    message: error.message || 'Error processing PDF file'
+                };
             }
+            });
+            
+            // Wait for all files in batch to complete
+            const batchResults = await Promise.all(batchPromises);
+            
+            // Separate successful results from errors
+            batchResults.forEach(result => {
+                if (result.error) {
+                    errors.push({
+                        filename: result.filename,
+                        error: result.message
+                    });
+                } else {
+                    results.push(result);
+                }
+            });
         }
 
         res.json({ 
@@ -454,15 +488,15 @@ app.post('/api/export-excel', async (req, res) => {
       }
     });
     
-    // Set column widths
+    // Set column widths for professional layout
     worksheet.columns = [
-      { width: 17 }, // A - DATE
-      { width: 40 }, // B - DESCRIPTION (increased for longer descriptions)
-      { width: 17 }, // C - Office & General
-      { width: 17 }, // D - Membership
-      { width: 17 }, // E - Subscriptions
-      { width: 17 }, // F - Education & Development
-      { width: 17 }, // G - Mileage/ETR
+      { width: 13 }, // A - DATE
+      { width: 55 }, // B - DESCRIPTION (Merchant: Description combined)
+      { width: 16 }, // C - 6408-000
+      { width: 15 }, // D - 6402-000
+      { width: 16 }, // E - 6404-000
+      { width: 19 }, // F - 7335-000
+      { width: 15 }, // G - 6026-000
     ];
     
     // -- HEADER SECTION --
@@ -573,33 +607,34 @@ app.post('/api/export-excel', async (req, res) => {
     
     const promoRow = 6;
     
-    // Promotion Expenses Header
+    // Promotion Expenses Header - Modern gradient-style design
     worksheet.mergeCells(`A${promoRow}:B${promoRow}`);
     const promoHeaderCell = worksheet.getCell(`A${promoRow}`);
     promoHeaderCell.value = 'PROMOTION EXPENSES';
     promoHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    promoHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
+    promoHeaderCell.font = { bold: true, size: 12, color: { argb: 'FFFFFF' }, name: 'Calibri' };
     promoHeaderCell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: '00A651' } // Green background
+      fgColor: { argb: '667EEA' } // Modern purple (matches UI gradient)
     };
     promoHeaderCell.border = {
       top: { style: 'medium' },
       left: { style: 'medium' },
       bottom: { style: 'medium' }
     };
+    worksheet.getRow(promoRow).height = 18; // Compact header
     
-    // G/L Allocation Header
+    // G/L Allocation Header - Modern gradient-style design
     worksheet.mergeCells(`C${promoRow}:G${promoRow}`);
     const glHeaderCell = worksheet.getCell(`C${promoRow}`);
     glHeaderCell.value = 'G/L ALLOCATION';
     glHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    glHeaderCell.font = { bold: true, color: { argb: 'FFFFFF' } };
+    glHeaderCell.font = { bold: true, size: 12, color: { argb: 'FFFFFF' }, name: 'Calibri' };
     glHeaderCell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: '00A651' } // Green background
+      fgColor: { argb: '667EEA' } // Modern purple (matches UI gradient)
     };
     glHeaderCell.border = {
       top: { style: 'medium' },
@@ -616,8 +651,14 @@ app.post('/api/export-excel', async (req, res) => {
       right: { style: 'thin' }
     };
     
-    worksheet.getCell(`C${glCodesRow}`).value = 'Other';
+    worksheet.getCell(`C${glCodesRow}`).value = '6408-000';
     worksheet.getCell(`C${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`C${glCodesRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`C${glCodesRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'E8EEFF' } // Light purple background
+    };
     worksheet.getCell(`C${glCodesRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
@@ -625,8 +666,14 @@ app.post('/api/export-excel', async (req, res) => {
       bottom: { style: 'thin' }
     };
     
-    worksheet.getCell(`D${glCodesRow}`).value = '6010-000';
+    worksheet.getCell(`D${glCodesRow}`).value = '6402-000';
     worksheet.getCell(`D${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`D${glCodesRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`D${glCodesRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'E8EEFF' } // Light purple background
+    };
     worksheet.getCell(`D${glCodesRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
@@ -634,8 +681,14 @@ app.post('/api/export-excel', async (req, res) => {
       bottom: { style: 'thin' }
     };
     
-    worksheet.getCell(`E${glCodesRow}`).value = '6011-000';
+    worksheet.getCell(`E${glCodesRow}`).value = '6404-000';
     worksheet.getCell(`E${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`E${glCodesRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`E${glCodesRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'E8EEFF' } // Light purple background
+    };
     worksheet.getCell(`E${glCodesRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
@@ -643,8 +696,14 @@ app.post('/api/export-excel', async (req, res) => {
       bottom: { style: 'thin' }
     };
     
-    worksheet.getCell(`F${glCodesRow}`).value = '6012-000';
+    worksheet.getCell(`F${glCodesRow}`).value = '7335-000';
     worksheet.getCell(`F${glCodesRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`F${glCodesRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`F${glCodesRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'E8EEFF' } // Light purple background
+    };
     worksheet.getCell(`F${glCodesRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
@@ -656,96 +715,113 @@ app.post('/api/export-excel', async (req, res) => {
       right: { style: 'medium' }
     };
     
-    // Gratuity Note Row
-    const gratuityRow = glCodesRow + 1;
-    worksheet.mergeCells(`A${gratuityRow}:B${gratuityRow}`);
-    worksheet.getCell(`A${gratuityRow}`).border = {
-      left: { style: 'medium' },
-      right: { style: 'thin' }
-    };
+    // Category Labels Row - Professional styling (removed gratuity row)
+    const categoryRow = glCodesRow + 1;
+    worksheet.getRow(categoryRow).height = 18; // Compact
     
-    worksheet.mergeCells(`C${gratuityRow}:F${gratuityRow}`);
-    const gratuityCell = worksheet.getCell(`C${gratuityRow}`);
-    gratuityCell.value = 'include gratuity where applicable';
-    gratuityCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    gratuityCell.font = { italic: true };
-    gratuityCell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFFF99' } // Light yellow background
-    };
-    gratuityCell.border = {
-      top: { style: 'thin' },
-      left: { style: 'thin' },
-      right: { style: 'thin' },
-      bottom: { style: 'thin' }
-    };
-    
-    worksheet.getCell(`G${gratuityRow}`).border = {
-      right: { style: 'medium' }
-    };
-    
-    // Category Labels Row
-    const categoryRow = gratuityRow + 1;
     worksheet.getCell(`A${categoryRow}`).value = 'DATE';
     worksheet.getCell(`A${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getCell(`A${categoryRow}`).font = { bold: true };
+    worksheet.getCell(`A${categoryRow}`).font = { bold: true, size: 11, name: 'Calibri' };
+    worksheet.getCell(`A${categoryRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'F5F5F7' } // Light gray background
+    };
     worksheet.getCell(`A${categoryRow}`).border = {
       left: { style: 'medium' },
       top: { style: 'thin' },
       right: { style: 'thin' },
-      bottom: { style: 'thin' }
+      bottom: { style: 'medium' }
     };
     
     worksheet.getCell(`B${categoryRow}`).value = 'DESCRIPTION';
     worksheet.getCell(`B${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getCell(`B${categoryRow}`).font = { bold: true };
+    worksheet.getCell(`B${categoryRow}`).font = { bold: true, size: 11, name: 'Calibri' };
+    worksheet.getCell(`B${categoryRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'F5F5F7' } // Light gray background
+    };
     worksheet.getCell(`B${categoryRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
       right: { style: 'thin' },
-      bottom: { style: 'thin' }
+      bottom: { style: 'medium' }
     };
     
-    worksheet.getCell(`C${categoryRow}`).value = 'Other';
-    worksheet.getCell(`C${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getCell(`C${categoryRow}`).font = { bold: true };
+    worksheet.getCell(`C${categoryRow}`).value = 'Office &\nGeneral';
+    worksheet.getCell(`C${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    worksheet.getCell(`C${categoryRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`C${categoryRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'F5F5F7' } // Light gray background
+    };
     worksheet.getCell(`C${categoryRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
       right: { style: 'thin' },
-      bottom: { style: 'thin' }
+      bottom: { style: 'medium' }
     };
     
-    worksheet.getCell(`D${categoryRow}`).value = 'Food &\nEntertainment';
-    worksheet.getCell(`D${categoryRow}`).alignment = { horizontal: 'center', wrapText: true };
+    worksheet.getCell(`D${categoryRow}`).value = 'Membership';
+    worksheet.getCell(`D${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`D${categoryRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`D${categoryRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'F5F5F7' } // Light gray background
+    };
     worksheet.getCell(`D${categoryRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
       right: { style: 'thin' },
-      bottom: { style: 'thin' }
+      bottom: { style: 'medium' }
     };
     
-    worksheet.getCell(`E${categoryRow}`).value = 'Social';
-    worksheet.getCell(`E${categoryRow}`).alignment = { horizontal: 'center' };
+    worksheet.getCell(`E${categoryRow}`).value = 'Subscriptions';
+    worksheet.getCell(`E${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`E${categoryRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`E${categoryRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'F5F5F7' } // Light gray background
+    };
     worksheet.getCell(`E${categoryRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
       right: { style: 'thin' },
-      bottom: { style: 'thin' }
+      bottom: { style: 'medium' }
     };
     
-    worksheet.getCell(`F${categoryRow}`).value = 'Travel Expenses\n(excl mileage)';
-    worksheet.getCell(`F${categoryRow}`).alignment = { horizontal: 'center', wrapText: true };
+    worksheet.getCell(`F${categoryRow}`).value = 'Education &\nDevelopment';
+    worksheet.getCell(`F${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    worksheet.getCell(`F${categoryRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`F${categoryRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'F5F5F7' } // Light gray background
+    };
     worksheet.getCell(`F${categoryRow}`).border = {
       top: { style: 'thin' },
       left: { style: 'thin' },
       right: { style: 'thin' },
-      bottom: { style: 'thin' }
+      bottom: { style: 'medium' }
     };
     
+    worksheet.getCell(`G${categoryRow}`).value = 'Mileage/ETR';
+    worksheet.getCell(`G${categoryRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getCell(`G${categoryRow}`).font = { bold: true, size: 10, name: 'Calibri' };
+    worksheet.getCell(`G${categoryRow}`).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'F5F5F7' } // Light gray background
+    };
     worksheet.getCell(`G${categoryRow}`).border = {
-      right: { style: 'medium' }
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'medium' },
+      bottom: { style: 'medium' }
     };
     
     // Add empty rows for Promotion expenses
@@ -770,7 +846,7 @@ app.post('/api/export-excel', async (req, res) => {
         right: { style: 'thin' },
         bottom: { style: 'thin' }
       };
-      row.getCell(2).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+      row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
       
       // Amount cells (C-F)
       for (let col = 3; col <= 6; col++) {
@@ -1034,8 +1110,9 @@ app.post('/api/export-excel', async (req, res) => {
             bottom: { style: 'thin' }
         };
         
-        // DESCRIPTION column - include location if available
-        let description = expense.description || '';
+        // DESCRIPTION column - combine merchant and description
+        const merchantName = expense.title || expense.merchant || '';
+        let description = merchantName ? `${merchantName}: ${expense.description || ''}` : (expense.description || '');
         if (expense.location) {
             description = `${description}${description ? '\n\n' : ''}Location: ${expense.location}`;
         }
@@ -1090,8 +1167,20 @@ app.post('/api/export-excel', async (req, res) => {
             description += splitDescription;
         }
         
-        row.getCell(2).value = description;
-        row.getCell(2).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+        // Apply rich text formatting to make merchant name bold
+        if (merchantName && description.startsWith(merchantName + ':')) {
+            // Use rich text format: bold merchant, normal description
+            const descriptionPart = description.substring(merchantName.length);
+            row.getCell(2).value = {
+                richText: [
+                    { font: { bold: true }, text: merchantName },
+                    { text: descriptionPart }
+                ]
+            };
+        } else {
+            row.getCell(2).value = description;
+        }
+        row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
         row.getCell(2).border = {
             top: { style: 'thin' },
             left: { style: 'thin' },
@@ -1154,7 +1243,7 @@ app.post('/api/export-excel', async (req, res) => {
         
         // Skip adding to Other Expenses if it's only a promotion expense
         if (!hasPromotionGLCode || (expense.splits && expense.splits.some(split => !['6010-000', '6011-000', '6012-000'].includes(split.glCode)))) {
-            // Add borders to all cells in the row
+            // Add borders to all cells in the row (columns C-G for GL codes)
             for (let col = 3; col <= 7; col++) {
                 row.getCell(col).border = {
                     top: { style: 'thin' },
@@ -1167,28 +1256,8 @@ app.post('/api/export-excel', async (req, res) => {
             // Ensure right border
             row.getCell(7).border.right = { style: 'medium' };
             
-            // Adjust row heights based on content length
-            const descLength = description.length;
-            const lineBreaks = (description.match(/\n/g) || []).length;
-            const approximateLines = Math.ceil(descLength / 50) + lineBreaks; // Estimate lines based on characters and explicit line breaks
-            
-            // Calculate height based on estimated lines
-            // Each line is approximately 15 points high in Excel
-            let rowHeight = Math.max(24, approximateLines * 18); // Increased minimum height to 24 points and line height to 18 points
-            
-            // Add extra padding for split information
-            if (expense.splits && expense.splits.length > 0) {
-                // Add additional height based on number of splits (each split takes roughly two lines now)
-                rowHeight += (expense.splits.length * 30);
-                // Add extra padding to ensure visibility
-                rowHeight += 15;
-            }
-            
-            // Apply calculated height
-            row.height = rowHeight;
-            
-            // Debug logging for troubleshooting
-            console.log(`Row height calculated: ${rowHeight} for description with ${descLength} chars and ${lineBreaks} line breaks`);
+            // Set compact row height
+            row.height = 18; // Compact, tight spacing
             
             currentRow++;
         }
@@ -1216,7 +1285,7 @@ app.post('/api/export-excel', async (req, res) => {
             right: { style: 'thin' },
             bottom: { style: 'thin' }
         };
-        row.getCell(2).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+        row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
         
         // Amount cells (C-G)
         for (let col = 3; col <= 7; col++) {
@@ -1232,8 +1301,8 @@ app.post('/api/export-excel', async (req, res) => {
         // Ensure right border
         row.getCell(7).border.right = { style: 'medium' };
         
-        // Set standard row height for empty rows
-        row.height = 24;
+        // Set compact row height for empty rows
+        row.height = 18;
     }
     
     // Update current row to account for empty rows added
@@ -1316,21 +1385,21 @@ app.post('/api/export-excel', async (req, res) => {
       fgColor: { argb: 'E6F2E6' } // Light green background
     };
     
-    // Set row heights
-    worksheet.getRow(promoRow).height = 24; // PROMOTION EXPENSES row
-    worksheet.getRow(categoryRow).height = 30; // Categories row
-    worksheet.getRow(otherRow).height = 24; // OTHER EXPENSES row
-    worksheet.getRow(otherCategoryRow).height = 32; // Other categories row
+    // Set compact row heights
+    worksheet.getRow(promoRow).height = 18; // PROMOTION EXPENSES row
+    worksheet.getRow(categoryRow).height = 18; // Categories row
+    worksheet.getRow(otherRow).height = 18; // OTHER EXPENSES row
+    worksheet.getRow(otherCategoryRow).height = 18; // Other categories row
     
-    // Set uniform row height for empty rows
+    // Set compact row height for empty rows
     for (let i = 0; i < promoRows; i++) {
-      worksheet.getRow(promoRowsStart + i).height = 24;
+      worksheet.getRow(promoRowsStart + i).height = 18;
     }
     
-    // Set other formatting
+    // Set compact default formatting
     for (let i = 1; i <= grandTotalRow; i++) {
       if (!worksheet.getRow(i).height) {
-        worksheet.getRow(i).height = 24; // Increased default height for better text wrapping
+        worksheet.getRow(i).height = 18; // Compact spacing
       }
     }
     
@@ -1680,15 +1749,15 @@ app.post('/api/export-email', async (req, res) => {
       }
     });
     
-    // Set column widths
+    // Set column widths for professional layout
     worksheet.columns = [
-      { width: 17 }, // A - DATE
-      { width: 40 }, // B - DESCRIPTION (increased for longer descriptions)
-      { width: 17 }, // C - Office & General
-      { width: 17 }, // D - Membership
-      { width: 17 }, // E - Subscriptions
-      { width: 17 }, // F - Education & Development
-      { width: 17 }, // G - Mileage/ETR
+      { width: 13 }, // A - DATE
+      { width: 55 }, // B - DESCRIPTION (Merchant: Description combined)
+      { width: 16 }, // C - 6408-000
+      { width: 15 }, // D - 6402-000
+      { width: 16 }, // E - 6404-000
+      { width: 19 }, // F - 7335-000
+      { width: 15 }, // G - 6026-000
     ];
     
     // -- HEADER SECTION --

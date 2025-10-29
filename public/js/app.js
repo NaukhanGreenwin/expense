@@ -170,6 +170,9 @@ function initApp() {
             }
         });
     }
+    
+    // Location dropdown removed per user request
+    // populateLocationDropdown();
 }
 
 // Function to open the add expense form
@@ -184,8 +187,7 @@ function openAddExpenseForm() {
         tax: '',
         date: new Date().toISOString().split('T')[0], // Today's date
         glCode: '6408-000', // Default G/L code
-        description: '',
-        location: '' // Add location field
+        description: ''
     };
     
     // Open the edit modal with the blank expense
@@ -213,8 +215,7 @@ function openTravelExpenseForm() {
         description: '',
         fromLocation: '',
         toLocation: '',
-        kilometers: '',
-        location: '' // Add location field
+        kilometers: ''
     };
     
     // Open the edit modal with the blank travel expense
@@ -338,7 +339,11 @@ function createEditModal() {
                 
                 <div class="form-group">
                     <label for="edit-location">Location</label>
-                    <input type="text" id="edit-location" placeholder="Enter the location">
+                    <select id="edit-location" class="location-dropdown">
+                        <option value="">Select a location</option>
+                        <!-- Options will be populated via JavaScript -->
+                    </select>
+                    <input type="hidden" id="property-code" name="property-code">
                 </div>
                 
                 <!-- Split Expense Section -->
@@ -485,7 +490,6 @@ function openEditModal(expense) {
     document.getElementById('edit-amount').value = expense.amount || 0;
     document.getElementById('edit-tax').value = expense.tax || calculateTax(expense.amount);
     document.getElementById('edit-date').value = expense.date || '';
-    document.getElementById('edit-location').value = expense.location || '';
     
     const glCodeSelect = document.getElementById('edit-gl-code');
     const customGlCodeInput = document.getElementById('edit-custom-gl-code');
@@ -636,8 +640,7 @@ async function saveEditedExpense(event) {
         tax: parseFloat(document.getElementById('edit-tax').value),
         date: document.getElementById('edit-date').value,
         glCode: glCode,
-        description: document.getElementById('edit-description').value,
-        location: document.getElementById('edit-location').value
+        description: document.getElementById('edit-description').value
     };
     
     // Handle expense splits
@@ -1083,8 +1086,7 @@ function populateExpenseForm(data) {
         description: extractedData.description || '',
         glCode: extractedData.gl_code || extractedData.glCode || determineGLCode(extractedData.merchant, extractedData.description) || '6408-000',
         name: nameInput.value.trim() || extractedData.name || '',  // Prioritize form input
-        department: departmentInput.value.trim() || extractedData.department || '', // Prioritize form input
-        location: extractedData.location || '' // Add location field
+        department: departmentInput.value.trim() || extractedData.department || '' // Prioritize form input
     };
     
     // Log the expense object for debugging
@@ -1175,6 +1177,9 @@ function applyFilters() {
 }
 
 // Render expenses to the table
+// Location functionality removed per user request // This file contains the missing functions that need to be appended to app.js
+
+// Complete the renderExpenses function and add all missing functions
 function renderExpenses() {
     expensesList.innerHTML = '';
     
@@ -1187,311 +1192,135 @@ function renderExpenses() {
         return;
     }
     
+    // Create each expense row
     filteredExpenses.forEach(expense => {
         const row = document.createElement('tr');
         
-        // Format date for display
-        const date = new Date(expense.date);
-        const formattedDate = date.toLocaleDateString();
+        // Format date
+        const formattedDate = new Date(expense.date).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
         
-        // Get description
-        let description = expense.description ? 
-            `<div class="expense-description">${expense.description}</div>` : '';
+        // Format amount
+        const formattedAmount = `$${parseFloat(expense.amount).toFixed(2)}`;
         
-        // If this is a split expense, show the main split info in the description
+        // Format tax
+        const taxDisplay = expense.tax ? `$${parseFloat(expense.tax).toFixed(2)}` : '-';
+        
+        // Get G/L code display
+        const glCodeDisplay = getGLCodeName(expense.glCode);
+        
+        // Create description with split info if applicable
+        let descriptionDisplay = expense.description || '';
+        
+        // Check if this is a split expense
         if (expense.splits && expense.splits.length > 0) {
-            const totalAmount = expense.amount;
-            const totalSplitAmount = expense.splits.reduce((sum, split) => sum + parseFloat(split.amount || 0), 0);
-            const remainingAmount = totalAmount - totalSplitAmount;
-            const remainingPercent = Math.round((remainingAmount / totalAmount) * 100);
+            descriptionDisplay += '<div class="expense-split-summary">';
             
-            description += `<div class="expense-split-summary">
-                <div class="split-detail primary">
-                    <span class="split-label">Primary (${expense.glCode}):</span> 
+            // Calculate remaining amount for primary G/L code
+            const totalSplitAmount = expense.splits.reduce((sum, split) => sum + parseFloat(split.amount || 0), 0);
+            const remainingAmount = parseFloat(expense.amount) - totalSplitAmount;
+            const remainingPercent = Math.round((remainingAmount / parseFloat(expense.amount)) * 100);
+            
+            if (remainingAmount > 0) {
+                descriptionDisplay += `<div class="split-detail primary">
+                    <span class="split-label">Primary (${expense.glCode}):</span>
                     <span class="split-value">$${remainingAmount.toFixed(2)} (${remainingPercent}%)</span>
                 </div>`;
-                
-            // Add each split allocation
+            }
+            
+            // Add each split
             expense.splits.forEach(split => {
-                description += `
-                <div class="split-detail">
-                    <span class="split-label">${split.glCode}:</span> 
-                    <span class="split-value">$${split.amount.toFixed(2)} (${Math.round(split.percentage)}%)</span>
+                descriptionDisplay += `<div class="split-detail">
+                    <span class="split-label">${split.glCode}:</span>
+                    <span class="split-value">$${parseFloat(split.amount).toFixed(2)} (${Math.round(split.percentage)}%)</span>
                 </div>`;
             });
             
-            description += '</div>';
-        }
-            
-        // Display tax amount as static text, similar to the amount field
-        const taxDisplay = `<span class="tax-value">$${expense.tax.toFixed(2)}</span>`;
-        
-        // Create dropdown for G/L Code
-        const glCodeDropdown = `
-            <select class="table-dropdown gl-dropdown" data-id="${expense.id}">
-                <option value="6408-000" ${expense.glCode === '6408-000' ? 'selected' : ''}>6408-000 (Office & General)</option>
-                <option value="6402-000" ${expense.glCode === '6402-000' ? 'selected' : ''}>6402-000 (Membership)</option>
-                <option value="6404-000" ${expense.glCode === '6404-000' ? 'selected' : ''}>6404-000 (Subscriptions)</option>
-                <option value="7335-000" ${expense.glCode === '7335-000' ? 'selected' : ''}>7335-000 (Education)</option>
-                <option value="6026-000" ${expense.glCode === '6026-000' ? 'selected' : ''}>6026-000 (Mileage/ETR)</option>
-                <option value="6010-000" ${expense.glCode === '6010-000' ? 'selected' : ''}>6010-000 (Food & Ent.)</option>
-                <option value="6011-000" ${expense.glCode === '6011-000' ? 'selected' : ''}>6011-000 (Social)</option>
-                <option value="6012-000" ${expense.glCode === '6012-000' ? 'selected' : ''}>6012-000 (Travel)</option>
-                <option value="other" ${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? 'selected' : ''}>Other</option>
-            </select>
-            <input type="text" class="custom-gl-input" data-id="${expense.id}" placeholder="Enter custom G/L code" value="${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? expense.glCode : ''}" style="display: ${!['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(expense.glCode) ? 'block' : 'none'}; margin-top: 5px; width: 100%;">
-        `;
-
-        // Handle split display
-        let splitInfo = '';
-        if (expense.splits && expense.splits.length > 0) {
-            // Calculate remaining amount
-            const totalSplitAmount = expense.splits.reduce((sum, split) => sum + split.amount, 0);
-            const remainingAmount = expense.amount - totalSplitAmount;
-            
-            // Create split info HTML
-            splitInfo = `
-                <div class="split-indicator">
-                    <span class="split-badge"><i class="fas fa-copy"></i> Split</span>
-                </div>
-            `;
+            descriptionDisplay += '</div>';
         }
         
-        // Make location editable
-        const locationInput = `<input type="text" class="location-input" data-id="${expense.id}" value="${expense.location || ''}" placeholder="Enter location">`;
-        
+        // Create row HTML
         row.innerHTML = `
             <td data-label="Date">${formattedDate}</td>
             <td data-label="Merchant">
-                <div class="merchant-name">${expense.title}</div>
-                ${description}
-                ${splitInfo}
+                <div class="expense-detail">
+                    <div class="merchant-name">${expense.title}</div>
+                    <div class="expense-description">${descriptionDisplay}</div>
+                </div>
             </td>
-            <td data-label="Amount">$${expense.amount.toFixed(2)}</td>
+            <td data-label="Amount">${formattedAmount}</td>
             <td data-label="Tax">${taxDisplay}</td>
-            <td data-label="G/L Code">${glCodeDropdown}</td>
-            <td data-label="Location">${locationInput}</td>
-            <td data-label="Actions">
+            <td data-label="G/L Code">${glCodeDisplay}</td>
+            <td data-label="Actions" class="action-cell">
                 <div class="action-buttons">
-                    <button class="btn-edit" data-id="${expense.id}">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="btn-delete" data-id="${expense.id}">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                <button class="btn-edit" data-id="${expense.id}"><i class="fas fa-edit"></i></button>
+                <button class="btn-delete" data-id="${expense.id}"><i class="fas fa-trash"></i></button>
                 </div>
             </td>
         `;
         
-        // Add event listeners to buttons
+        // Add event listeners
         const editBtn = row.querySelector('.btn-edit');
         const deleteBtn = row.querySelector('.btn-delete');
         
-        editBtn.addEventListener('click', () => {
-            const expenseToEdit = expenses.find(e => e.id === expense.id);
-            if (expenseToEdit) {
-                openEditModal(expenseToEdit);
-            }
-        });
-        
-        deleteBtn.addEventListener('click', () => {
-            if (confirm('Are you sure you want to delete this expense?')) {
-                // For now, just remove from local state
-                expenses = expenses.filter(exp => exp.id !== expense.id);
-                filteredExpenses = filteredExpenses.filter(exp => exp.id !== expense.id);
-                renderExpenses();
-                updateTotalAmount();
-                showNotification('Expense deleted successfully', 'success');
-            }
-        });
-        
-        // Add event listener for location input
-        const locationInputEl = row.querySelector('.location-input');
-        locationInputEl.addEventListener('blur', (e) => {
-            const newLocation = e.target.value.trim();
-            updateExpenseLocation(expense.id, newLocation);
-        });
-        
-        // Handle Enter key for location input
-        locationInputEl.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const newLocation = e.target.value.trim();
-                updateExpenseLocation(expense.id, newLocation);
-                e.target.blur();
-            }
-        });
-        
-        // Add event listeners to the dropdowns
-        const glCodeDropdownEl = row.querySelector('.gl-dropdown');
-        const customGlInputEl = row.querySelector('.custom-gl-input');
-        
-        glCodeDropdownEl.addEventListener('change', (e) => {
-            const selectedValue = e.target.value;
-            
-            if (selectedValue === 'other') {
-                // Show the custom input field
-                customGlInputEl.style.display = 'block';
-                customGlInputEl.focus();
-            } else {
-                // Hide the custom input field and update the G/L code
-                customGlInputEl.style.display = 'none';
-                updateExpenseGLCode(expense.id, selectedValue);
-            }
-        });
-        
-        // Add event listener for the custom G/L code input
-        customGlInputEl.addEventListener('blur', (e) => {
-            const customValue = e.target.value.trim();
-            if (customValue) {
-                updateExpenseGLCode(expense.id, customValue);
-            }
-        });
-        
-        // Also handle Enter key press
-        customGlInputEl.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const customValue = e.target.value.trim();
-                if (customValue) {
-                    updateExpenseGLCode(expense.id, customValue);
-                    e.target.blur();
-                }
-            }
-        });
+        editBtn.addEventListener('click', () => openEditModal(expense));
+        deleteBtn.addEventListener('click', () => deleteExpense(expense.id));
         
         expensesList.appendChild(row);
     });
 }
 
-// Update expense tax amount
-async function updateExpenseTax(expenseId, newTaxAmount) {
+// Get G/L code display name
+function getGLCodeName(code) {
+    const codeMap = {
+        '6408-000': '6408-000 (Office & General)',
+        '6402-000': '6402-000 (Membership)',
+        '6404-000': '6404-000 (Subscriptions)',
+        '7335-000': '7335-000 (Education)',
+        '6026-000': '6026-000 (Mileage/ETR)',
+        '6010-000': '6010-000 (Food & Ent.)',
+        '6011-000': '6011-000 (Social)',
+        '6012-000': '6012-000 (Travel)'
+    };
+    return codeMap[code] || code;
+}
+
+// Delete expense
+async function deleteExpense(expenseId) {
+    if (!confirm('Are you sure you want to delete this expense?')) {
+        return;
+    }
+    
     try {
-        // Find the expense in our local state
-        const expense = expenses.find(exp => exp.id === expenseId);
-        if (!expense) return;
+        // Remove from local state
+        expenses = expenses.filter(e => e.id !== expenseId);
+        filteredExpenses = filteredExpenses.filter(e => e.id !== expenseId);
         
-        // Update local state first for immediate feedback
-        expense.tax = newTaxAmount;
-        
-        // Update the expense on the server
-        const response = await fetch(`/api/expenses/${expenseId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(expense)
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to update expense');
-        }
-        
-        // Re-render the expenses list to reflect the changes
+        // Re-render
         renderExpenses();
-        showNotification('Tax amount updated successfully', 'success');
-    } catch (error) {
-        console.error('Error updating expense:', error);
-        showNotification('Failed to update tax amount', 'error');
+        updateTotalAmount();
         
-        // Revert changes in case of error
-        fetchExpenses();
+        showNotification('Expense deleted successfully', 'success');
+                } catch (error) {
+        console.error('Error deleting expense:', error);
+        showNotification('Failed to delete expense', 'error');
     }
 }
 
-// Update expense GL code
-async function updateExpenseGLCode(expenseId, newGLCode) {
-    try {
-        // Find the expense in our local state
-        const expense = expenses.find(exp => exp.id === expenseId);
-        if (!expense) return;
-        
-        // Store original values in case we need to show edit form
-        const originalExpense = {...expense};
-        
-        // Check if switching to mileage code
-        const isMileageCode = newGLCode === '6026-000';
-        
-        // If switching to mileage, open edit modal to get mileage details
-        if (isMileageCode) {
-            // Open the edit modal first to get mileage details
-            openEditModal(expense);
-            
-            // Pre-select the mileage code
-            const glCodeSelect = document.getElementById('edit-gl-code');
-            if (glCodeSelect) {
-                glCodeSelect.value = '6026-000';
-                // Trigger the change event manually to show mileage fields
-                glCodeSelect.dispatchEvent(new Event('change'));
-            }
-            
-            // Show a notification about entering mileage details
-            showNotification('Please enter mileage details', 'info');
-            return;
-        }
-        
-        // Update local state first for immediate feedback
-        expense.glCode = newGLCode;
-        
-        // If changing from mileage to normal expense, reset any mileage-specific fields
-        if (expense.kilometers) {
-            delete expense.kilometers;
-            delete expense.fromLocation;
-            delete expense.toLocation;
-            delete expense.tripPurpose;
-        }
-        
-        // Update the expense on the server
-        const response = await fetch(`/api/expenses/${expenseId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(expense)
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to update expense');
-        }
-        
-        // Re-render the expenses list to reflect the changes
-        renderExpenses();
-        showNotification('G/L code updated successfully', 'success');
-    } catch (error) {
-        console.error('Error updating expense:', error);
-        showNotification('Failed to update G/L code', 'error');
-        
-        // Revert changes in case of error
-        fetchExpenses();
-    }
-}
-
-// Update the total amount display
+// Update total amount
 function updateTotalAmount() {
-    if (!expensesTotal) return;
+    const total = filteredExpenses.reduce((sum, expense) => {
+        return sum + parseFloat(expense.amount || 0);
+    }, 0);
     
-    // Calculate regular total
-    const total = filteredExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
-    
-    // Calculate mileage totals
-    const mileageExpenses = filteredExpenses.filter(e => e.glCode === '6026-000');
-    const totalKilometers = mileageExpenses.reduce((sum, expense) => sum + (parseFloat(expense.kilometers) || 0), 0);
-    const totalMileageAmount = mileageExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
-    
-    // Update the display
-    expensesTotal.innerHTML = `
-        <div>Total: <span class="total-amount">$${total.toFixed(2)}</span></div>
-        ${totalKilometers > 0 ? `
-        <div class="mileage-summary">
-            <div>Total Kilometers: <span class="km-amount">${totalKilometers.toFixed(1)} km</span></div>
-            <div>Total Mileage Reimbursement: <span class="mileage-amount">$${totalMileageAmount.toFixed(2)}</span></div>
-        </div>
-        ` : ''}
-    `;
+    expensesTotal.textContent = `$${total.toFixed(2)}`;
 }
 
 // Show notification
-function showNotification(message, type = 'info') {
+function showNotification(message, type = 'info', duration = 3000) {
     // Remove any existing notifications
     const existingNotification = document.querySelector('.notification');
     if (existingNotification) {
@@ -1503,118 +1332,477 @@ function showNotification(message, type = 'info') {
     notification.className = `notification ${type}`;
     
     // Add icon based on type
-    let icon = '';
-    switch(type) {
-        case 'success':
-            icon = '<i class="fas fa-check-circle"></i>';
-            break;
-        case 'error':
-            icon = '<i class="fas fa-exclamation-circle"></i>';
-            break;
-        case 'warning':
-            icon = '<i class="fas fa-exclamation-triangle"></i>';
-            break;
-        case 'info':
-        default:
-            icon = '<i class="fas fa-info-circle"></i>';
-            break;
-    }
+    let icon = 'fa-info-circle';
+    if (type === 'success') icon = 'fa-check-circle';
+    if (type === 'error') icon = 'fa-exclamation-circle';
+    if (type === 'warning') icon = 'fa-exclamation-triangle';
     
-    // Set content
     notification.innerHTML = `
-        ${icon}
+        <i class="fas ${icon}"></i>
         <span>${message}</span>
         <button class="close-btn">&times;</button>
     `;
     
-    // Add to DOM
     document.body.appendChild(notification);
     
-    // Add event listener to close button
-    notification.querySelector('.close-btn').addEventListener('click', () => {
-        notification.remove();
+    // Trigger animation
+    setTimeout(() => notification.classList.add('show'), 10);
+    
+    // Add close button listener
+    const closeBtn = notification.querySelector('.close-btn');
+    closeBtn.addEventListener('click', () => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
     });
     
-    // Show notification
-    setTimeout(() => {
-        notification.classList.add('show');
-    }, 10);
-    
-    // Hide after 5 seconds
-    setTimeout(() => {
-        if (document.body.contains(notification)) {
+    // Auto-remove after duration
+    if (duration > 0) {
+        setTimeout(() => {
             notification.classList.remove('show');
-            setTimeout(() => {
-                if (document.body.contains(notification)) {
-                    notification.remove();
-                }
-            }, 300);
+            setTimeout(() => notification.remove(), 300);
+        }, duration);
+    }
+}
+
+// Location dropdown removed per user request
+
+// Determine G/L code based on merchant and description
+function determineGLCode(merchant, description) {
+    const text = `${merchant} ${description}`.toLowerCase();
+    
+    // Office & General
+    if (text.includes('office') || text.includes('staples') || text.includes('supplies')) {
+        return '6408-000';
+    }
+    
+    // Membership
+    if (text.includes('membership') || text.includes('association')) {
+        return '6402-000';
+    }
+    
+    // Subscriptions
+    if (text.includes('subscription') || text.includes('software') || text.includes('cloud') || 
+        text.includes('microsoft') || text.includes('adobe') || text.includes('zoom')) {
+        return '6404-000';
+    }
+    
+    // Education
+    if (text.includes('training') || text.includes('course') || text.includes('education') || 
+        text.includes('certification') || text.includes('workshop')) {
+        return '7335-000';
+    }
+    
+    // Mileage/ETR
+    if (text.includes('parking') || text.includes('toll') || text.includes('mileage') || 
+        text.includes('transit')) {
+        return '6026-000';
+    }
+    
+    // Food & Entertainment
+    if (text.includes('restaurant') || text.includes('coffee') || text.includes('lunch') || 
+        text.includes('dinner') || text.includes('meal') || text.includes('starbucks') ||
+        text.includes('tim hortons')) {
+        return '6010-000';
+    }
+    
+    // Travel
+    if (text.includes('hotel') || text.includes('flight') || text.includes('airbnb') || 
+        text.includes('taxi') || text.includes('uber') || text.includes('lyft')) {
+        return '6012-000';
+    }
+    
+    // Default to Office & General
+    return '6408-000';
+}
+
+// Add split row to the split container
+function addSplitRow(glCode = '', amount = '', percentage = '') {
+    const splitContainer = document.getElementById('split-container');
+    if (!splitContainer) return;
+    
+    const splitRow = document.createElement('div');
+    splitRow.className = 'split-row';
+    
+    const splitId = Date.now() + Math.random();
+    
+    splitRow.innerHTML = `
+        <div class="split-row-content">
+            <div class="split-gl-group">
+                <select class="split-gl-select">
+                    <option value="">Select G/L Code</option>
+                    <option value="6408-000" ${glCode === '6408-000' ? 'selected' : ''}>6408-000 (Office & General)</option>
+                    <option value="6402-000" ${glCode === '6402-000' ? 'selected' : ''}>6402-000 (Membership)</option>
+                    <option value="6404-000" ${glCode === '6404-000' ? 'selected' : ''}>6404-000 (Subscriptions)</option>
+                    <option value="7335-000" ${glCode === '7335-000' ? 'selected' : ''}>7335-000 (Education)</option>
+                    <option value="6026-000" ${glCode === '6026-000' ? 'selected' : ''}>6026-000 (Mileage/ETR)</option>
+                    <option value="6010-000" ${glCode === '6010-000' ? 'selected' : ''}>6010-000 (Food & Ent.)</option>
+                    <option value="6011-000" ${glCode === '6011-000' ? 'selected' : ''}>6011-000 (Social)</option>
+                    <option value="6012-000" ${glCode === '6012-000' ? 'selected' : ''}>6012-000 (Travel)</option>
+                    <option value="other">Other</option>
+                </select>
+                <input type="text" class="split-custom-gl" placeholder="Enter custom G/L code" style="display: ${glCode && !['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(glCode) ? 'block' : 'none'};" value="${glCode && !['6408-000', '6402-000', '6404-000', '7335-000', '6026-000', '6010-000', '6011-000', '6012-000'].includes(glCode) ? glCode : ''}">
+            </div>
+            <div class="split-amount-inputs">
+                <div class="split-dollar">
+                    <span class="dollar-sign">$</span>
+                    <input type="number" class="split-amount-input" placeholder="Amount" step="0.01" min="0" value="${amount}">
+                </div>
+                <div class="split-percent">
+                    <input type="number" class="split-percent-input" placeholder="%" step="0.1" min="0" max="100" value="${percentage}">
+                    <span class="percent-sign">%</span>
+                </div>
+            </div>
+            <button type="button" class="btn-remove-split"><i class="fas fa-times"></i></button>
+        </div>
+    `;
+    
+    splitContainer.appendChild(splitRow);
+    
+    // Show split summary if not already visible
+    const splitSummary = document.getElementById('split-summary');
+    if (splitSummary) {
+        splitSummary.style.display = 'block';
+    }
+    
+    // Add event listeners
+    const glSelect = splitRow.querySelector('.split-gl-select');
+    const customGlInput = splitRow.querySelector('.split-custom-gl');
+    const amountInput = splitRow.querySelector('.split-amount-input');
+    const percentInput = splitRow.querySelector('.split-percent-input');
+    const removeBtn = splitRow.querySelector('.btn-remove-split');
+    
+    // Show/hide custom G/L input
+    glSelect.addEventListener('change', function() {
+        if (this.value === 'other') {
+            customGlInput.style.display = 'block';
+        } else {
+            customGlInput.style.display = 'none';
         }
-    }, 5000);
+        updateSplitTotals();
+    });
+    
+    // Update totals when amount changes
+    amountInput.addEventListener('input', function() {
+        // Auto-calculate percentage
+        const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
+        const splitAmount = parseFloat(this.value) || 0;
+        if (totalAmount > 0) {
+            const percent = (splitAmount / totalAmount) * 100;
+            percentInput.value = percent.toFixed(1);
+        }
+        updateSplitTotals();
+    });
+    
+    // Update totals when percentage changes
+    percentInput.addEventListener('input', function() {
+        // Auto-calculate amount
+        const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
+        const percent = parseFloat(this.value) || 0;
+        const splitAmount = (totalAmount * percent) / 100;
+        amountInput.value = splitAmount.toFixed(2);
+        updateSplitTotals();
+    });
+    
+    // Remove split
+    removeBtn.addEventListener('click', function() {
+        splitRow.remove();
+        updateSplitTotals();
+        
+        // Hide split summary if no more splits
+        if (splitContainer.children.length === 0 && splitSummary) {
+            splitSummary.style.display = 'none';
+        }
+    });
+}
+
+// Update split totals
+function updateSplitTotals() {
+    const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
+    const splitContainer = document.getElementById('split-container');
+    
+    if (!splitContainer || splitContainer.children.length === 0) {
+        return;
+    }
+    
+    let allocatedAmount = 0;
+    
+    // Sum up all split amounts
+    const splitRows = splitContainer.querySelectorAll('.split-row');
+    splitRows.forEach(row => {
+        const amountInput = row.querySelector('.split-amount-input');
+        allocatedAmount += parseFloat(amountInput.value) || 0;
+    });
+    
+    const remainingAmount = totalAmount - allocatedAmount;
+    const allocatedPercent = totalAmount > 0 ? (allocatedAmount / totalAmount) * 100 : 0;
+    const remainingPercent = totalAmount > 0 ? (remainingAmount / totalAmount) * 100 : 100;
+    
+    // Update display
+    document.getElementById('split-allocated-amount').textContent = `$${allocatedAmount.toFixed(2)}`;
+    document.getElementById('split-allocated-percent').textContent = `${allocatedPercent.toFixed(1)}%`;
+    document.getElementById('split-remaining-amount').textContent = `$${remainingAmount.toFixed(2)}`;
+    document.getElementById('split-remaining-percent').textContent = `${remainingPercent.toFixed(1)}%`;
+}
+
+// Initialize signature functionality
+function initSignature() {
+    signatureCanvas = document.getElementById('signature-canvas');
+    if (!signatureCanvas) return;
+    
+    signatureCtx = signatureCanvas.getContext('2d');
+    
+    // Check for saved signature
+    const savedSignature = localStorage.getItem('userSignature');
+    if (savedSignature) {
+        userSignature = savedSignature;
+        displayCurrentSignature();
+    }
+    
+    // Set up canvas
+    setupCanvas();
+    
+    // Tab switching
+    document.getElementById('draw-tab')?.addEventListener('click', () => switchTab('draw'));
+    document.getElementById('upload-tab')?.addEventListener('click', () => switchTab('upload'));
+    
+    // Drawing events
+    signatureCanvas.addEventListener('mousedown', startDrawing);
+    signatureCanvas.addEventListener('mousemove', draw);
+    signatureCanvas.addEventListener('mouseup', stopDrawing);
+    signatureCanvas.addEventListener('mouseout', stopDrawing);
+    
+    // Touch events for mobile
+    signatureCanvas.addEventListener('touchstart', handleTouchStart);
+    signatureCanvas.addEventListener('touchmove', handleTouchMove);
+    signatureCanvas.addEventListener('touchend', stopDrawing);
+    
+    // Buttons
+    document.getElementById('clear-signature')?.addEventListener('click', clearSignature);
+    document.getElementById('save-drawn-signature')?.addEventListener('click', saveDrawnSignature);
+    document.getElementById('signature-upload')?.addEventListener('click', handleSignatureUpload);
+    document.getElementById('save-uploaded-signature')?.addEventListener('click', saveUploadedSignature);
+    document.getElementById('change-signature')?.addEventListener('click', changeSignature);
+}
+
+function setupCanvas() {
+    if (!signatureCanvas) return;
+    
+    const rect = signatureCanvas.getBoundingClientRect();
+    signatureCanvas.width = rect.width;
+    signatureCanvas.height = rect.height;
+    
+    signatureCtx.strokeStyle = '#000';
+    signatureCtx.lineWidth = 2;
+    signatureCtx.lineCap = 'round';
+    signatureCtx.lineJoin = 'round';
+}
+
+function switchTab(tab) {
+    const drawTab = document.getElementById('draw-tab');
+    const uploadTab = document.getElementById('upload-tab');
+    const drawPanel = document.getElementById('draw-signature-panel');
+    const uploadPanel = document.getElementById('upload-signature-panel');
+    
+    if (tab === 'draw') {
+        drawTab.classList.add('active');
+        uploadTab.classList.remove('active');
+        drawPanel.classList.add('active');
+        uploadPanel.classList.remove('active');
+    } else {
+        drawTab.classList.remove('active');
+        uploadTab.classList.add('active');
+        drawPanel.classList.remove('active');
+        uploadPanel.classList.add('active');
+    }
+}
+
+function startDrawing(e) {
+    isDrawing = true;
+    const rect = signatureCanvas.getBoundingClientRect();
+    signatureCtx.beginPath();
+    signatureCtx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function draw(e) {
+    if (!isDrawing) return;
+    const rect = signatureCanvas.getBoundingClientRect();
+    signatureCtx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    signatureCtx.stroke();
+}
+
+function stopDrawing() {
+    isDrawing = false;
+}
+
+function handleTouchStart(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousedown', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    signatureCanvas.dispatchEvent(mouseEvent);
+}
+
+function handleTouchMove(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousemove', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    signatureCanvas.dispatchEvent(mouseEvent);
+}
+
+function clearSignature() {
+    if (!signatureCtx) return;
+    signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+}
+
+function saveDrawnSignature() {
+    if (!signatureCanvas) return;
+    
+    // Check if canvas is empty
+    const imageData = signatureCtx.getImageData(0, 0, signatureCanvas.width, signatureCanvas.height);
+    const isEmpty = !imageData.data.some(channel => channel !== 0);
+    
+    if (isEmpty) {
+        showNotification('Please draw your signature first', 'warning');
+        return;
+    }
+    
+    userSignature = signatureCanvas.toDataURL('image/png');
+    localStorage.setItem('userSignature', userSignature);
+    displayCurrentSignature();
+    showNotification('Signature saved successfully', 'success');
+}
+
+function handleSignatureUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const img = document.getElementById('signature-preview');
+        img.src = event.target.result;
+        document.getElementById('signature-preview-container').style.display = 'block';
+        userSignature = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function saveUploadedSignature() {
+    if (!userSignature) {
+        showNotification('Please upload a signature image first', 'warning');
+        return;
+    }
+    
+    localStorage.setItem('userSignature', userSignature);
+    displayCurrentSignature();
+    showNotification('Signature saved successfully', 'success');
+}
+
+function displayCurrentSignature() {
+    const container = document.getElementById('current-signature-container');
+    const img = document.getElementById('current-signature');
+    
+    if (userSignature && container && img) {
+        img.src = userSignature;
+        container.style.display = 'block';
+    }
+}
+
+function changeSignature() {
+    const container = document.getElementById('current-signature-container');
+    if (container) {
+        container.style.display = 'none';
+    }
+    clearSignature();
+}
+
+// Reset all data
+function resetAllData() {
+    if (!confirm('Are you sure you want to reset all data? This will clear all expenses and your signature.')) {
+        return;
+    }
+    
+    // Clear expenses
+    expenses = [];
+    filteredExpenses = [];
+    renderExpenses();
+    updateTotalAmount();
+    
+    // Clear signature
+    if (signatureCanvas && signatureCtx) {
+        clearSignature();
+        localStorage.removeItem('userSignature');
+        userSignature = null;
+        
+        const currentContainer = document.getElementById('current-signature-container');
+        if (currentContainer) {
+            currentContainer.style.display = 'none';
+        }
+    }
+    
+    // Reset form inputs
+    const nameInput = document.getElementById('user-name');
+    const departmentInput = document.getElementById('user-department');
+    const pdfFileInput = document.getElementById('pdf-file');
+    
+    if (nameInput) nameInput.value = '';
+    if (departmentInput) departmentInput.value = '';
+    if (pdfFileInput) pdfFileInput.value = '';
+    
+    // Clear results
+    const resultsContainer = document.getElementById('pdf-results-container');
+    if (resultsContainer) resultsContainer.innerHTML = '';
+    
+    const uploadStatus = document.getElementById('pdf-upload-status');
+    if (uploadStatus) uploadStatus.innerHTML = '';
+    
+    currentSessionId = null;
+    
+    showNotification('All data has been reset', 'success');
 }
 
 // Handle Excel export
 async function handleExcelExport() {
     if (expenses.length === 0) {
-        showNotification('No expenses to export', 'error');
+        showNotification('No expenses to export', 'warning');
         return;
     }
     
     try {
-        // Show loading indicator
         loadingOverlay.classList.add('active');
         document.querySelector('.loading-overlay p').textContent = 'Generating Excel report...';
         
-        // Get the currently filtered expenses or all expenses
-        const dataToExport = filteredExpenses.length > 0 ? filteredExpenses : expenses;
-        
-        // Include signature data if available
-        const exportData = {
-            expenses: dataToExport,
-            signature: userSignature || null
-        };
-        
-        // Debug logging for signature
-        console.log('Signature data present:', !!userSignature);
-        if (userSignature) {
-            console.log('Signature data length:', userSignature.length);
-            console.log('Signature data starts with:', userSignature.substring(0, 50) + '...');
-        }
-        
-        // Send request to server
         const response = await fetch('/api/export-excel', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(exportData)
+            body: JSON.stringify({ 
+                expenses: expenses,
+                signature: userSignature
+            })
         });
-        
-        // Hide loading indicator
-        loadingOverlay.classList.remove('active');
         
         if (!response.ok) {
             throw new Error('Failed to generate Excel report');
         }
         
-        // Get the blob from the response
+        // Download the file
         const blob = await response.blob();
-        
-        // Create a download link
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.style.display = 'none';
         a.href = url;
-        a.download = 'Greenwin_Expense_Report.xlsx';
-        
-        // Add to the DOM and trigger the download
+        a.download = `Expense_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
         document.body.appendChild(a);
         a.click();
-        
-        // Clean up
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
         
+        loadingOverlay.classList.remove('active');
         showNotification('Excel report generated successfully', 'success');
     } catch (error) {
         console.error('Error exporting to Excel:', error);
@@ -1623,1283 +1811,42 @@ async function handleExcelExport() {
     }
 }
 
-// Handle PDF merge and export
+// Handle PDF export
 async function handlePdfExport() {
+    if (!currentSessionId) {
+        showNotification('No receipts to export. Please upload PDF receipts first.', 'warning');
+        return;
+    }
+    
     try {
-        // Show loading indicator
         loadingOverlay.classList.add('active');
-        document.querySelector('.loading-overlay p').textContent = 'Merging PDF invoices...';
+        document.querySelector('.loading-overlay p').textContent = 'Merging PDF receipts...';
         
-        if (!currentSessionId) {
-            loadingOverlay.classList.remove('active');
-            showNotification('No active session found. Please upload PDFs first.', 'error');
-            return;
-        }
-        
-        // Call the exportPDF function
-        await exportPDF();
-        
-        // Hide loading indicator
-        loadingOverlay.classList.remove('active');
-        
-        showNotification('PDF invoices merged and downloaded successfully', 'success');
-    } catch (error) {
-        console.error('Error merging PDFs:', error);
-        loadingOverlay.classList.remove('active');
-        showNotification('Failed to merge PDF invoices: ' + error.message, 'error');
-    }
-}
-
-// Function to determine G/L code based on merchant name and description
-function determineGLCode(merchant, description) {
-    // Convert inputs to lowercase strings for easier matching
-    const merchantLower = (merchant || '').toLowerCase();
-    const descriptionLower = (description || '').toLowerCase();
-    const combinedText = merchantLower + ' ' + descriptionLower;
-    
-    // Check for subscription-related keywords
-    if (combinedText.includes('subscription') || 
-        combinedText.includes('license') || 
-        combinedText.includes('starlink') ||
-        combinedText.includes('zoho') ||
-        combinedText.includes('microsoft') ||
-        combinedText.includes('adobe') ||
-        combinedText.includes('office 365')) {
-        return '6404-000'; // Subscriptions
-    }
-    
-    // Check for education/training-related keywords
-    if (combinedText.includes('training') || 
-        combinedText.includes('course') || 
-        combinedText.includes('education') ||
-        combinedText.includes('certification') ||
-        combinedText.includes('workshop') ||
-        combinedText.includes('seminar')) {
-        return '7335-000'; // Education
-    }
-    
-    // Check for food & entertainment-related keywords
-    if (combinedText.includes('restaurant') || 
-        combinedText.includes('cafe') || 
-        combinedText.includes('coffee') ||
-        combinedText.includes('lunch') ||
-        combinedText.includes('dinner') ||
-        combinedText.includes('catering')) {
-        return '6010-000'; // Food & Entertainment
-    }
-    
-    // Check for travel-related keywords
-    if (combinedText.includes('hotel') || 
-        combinedText.includes('flight') || 
-        combinedText.includes('airfare') ||
-        combinedText.includes('taxi') ||
-        combinedText.includes('uber') ||
-        combinedText.includes('lyft')) {
-        return '6012-000'; // Travel Expenses
-    }
-    
-    // Check for mileage-related keywords
-    if (combinedText.includes('mileage') || 
-        combinedText.includes('toll') || 
-        combinedText.includes('etr') ||
-        combinedText.includes('highway') ||
-        combinedText.includes('km')) {
-        return '6026-000'; // Mileage/ETR
-    }
-    
-    // Check for membership-related keywords
-    if (combinedText.includes('membership') || 
-        combinedText.includes('dues') || 
-        combinedText.includes('association') ||
-        combinedText.includes('professional fee')) {
-        return '6402-000'; // Membership
-    }
-    
-    // Default to Office & General for hardware, equipment, and other expenses
-    if (combinedText.includes('hardware') || 
-        combinedText.includes('equipment') ||
-        combinedText.includes('dell') ||
-        combinedText.includes('computer') ||
-        combinedText.includes('laptop') ||
-        combinedText.includes('office')) {
-        return '6408-000'; // Office & General
-    }
-    
-    // Default to Office & General if no specific match
-    return '6408-000';
-}
-
-// Function to export expenses to PDF
-async function exportPDF() {
-    try {
-        const sessionId = currentSessionId; // Get the current session ID
-        if (!sessionId) {
-            console.error('No active session found');
-            return;
-        }
-
-        // Create a temporary link element
-        const link = document.createElement('a');
-        link.href = `/api/export-pdf?sessionId=${sessionId}`;
-        link.download = 'expense_report.pdf';
-        
-        // Append to body, click, and remove
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    } catch (error) {
-        console.error('Error exporting to PDF:', error);
-    }
-}
-
-// Function to handle file upload
-async function handleFileUpload(event) {
-    event.preventDefault();
-    
-    const formData = new FormData();
-    const files = document.getElementById('pdfFiles').files;
-    const userName = document.getElementById('userName').value;
-    const userDepartment = document.getElementById('userDepartment').value;
-    
-    if (!userName || !userDepartment) {
-        alert('Please enter your name and department');
-        return;
-    }
-    
-    if (files.length === 0) {
-        alert('Please select at least one PDF file');
-        return;
-    }
-    
-    formData.append('userName', userName);
-    formData.append('userDepartment', userDepartment);
-    
-    for (let i = 0; i < files.length; i++) {
-        formData.append('pdfFiles', files[i]);
-    }
-    
-    try {
-        const response = await fetch('/api/upload-pdf', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Store the session ID
-            currentSessionId = data.sessionId;
-            
-            // Process successful results
-            data.results.forEach(result => {
-                expenses.push(result.data);
-            });
-            
-            // Update the expenses list
-            updateExpensesList();
-            
-            // Clear the form
-            event.target.reset();
-            
-            // Show success message
-            alert(`Successfully processed ${data.processedCount} files`);
-        } else {
-            alert('Error processing files: ' + data.error);
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error uploading files');
-    }
-}
-
-// Update the editExpense function to include mileage handling
-function editExpense(event) {
-    // Get the row element
-    const row = event.target.closest('tr');
-    if (!row) return;
-    
-    // Get the row data
-    const id = row.dataset.id;
-    const date = row.querySelector('td:nth-child(1)').textContent.trim();
-    const title = row.querySelector('td:nth-child(2) .title-text')?.textContent || '';
-    const description = row.querySelector('td:nth-child(2) .description-text')?.textContent || '';
-    const amount = row.querySelector('td:nth-child(3)').textContent.trim().replace('$', '');
-    const tax = row.querySelector('td:nth-child(4)').textContent.trim().replace('$', '');
-    const glCode = row.querySelector('td:nth-child(5) select')?.value || '';
-    
-    // Create modal with form
-    const modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.innerHTML = `
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Edit Expense</h2>
-            <form id="edit-expense-form">
-                <input type="hidden" name="id" value="${id}">
-                <div class="form-group">
-                    <label for="date">Date</label>
-                    <input type="date" id="date" name="date" value="${date}" required>
-                </div>
-                <div class="form-group">
-                    <label for="title">Merchant/Title</label>
-                    <input type="text" id="title" name="title" value="${title}" required>
-                </div>
-                <div class="form-group">
-                    <label for="description">Description</label>
-                    <textarea id="description" name="description">${description}</textarea>
-                </div>
-                <div class="form-group">
-                    <label for="amount" id="amount-label">Amount ($)</label>
-                    <input type="number" id="amount" name="amount" step="0.01" value="${amount}" required>
-                    <div id="calculated-amount" style="display: none;"></div>
-                </div>
-                <div class="form-group" id="tax-group">
-                    <label for="tax">Tax (HST)</label>
-                    <input type="number" id="tax" name="tax" step="0.01" value="${tax}">
-                </div>
-                <div class="form-group">
-                    <label for="glCode">G/L Code</label>
-                    <select id="glCode" name="glCode" required>
-                        <option value="6026-000" ${glCode === '6026-000' ? 'selected' : ''}>6026-000 (Mileage/ETR)</option>
-                        <option value="6210-000" ${glCode === '6210-000' ? 'selected' : ''}>6210-000 (Computer Supplies)</option>
-                        <option value="6400-000" ${glCode === '6400-000' ? 'selected' : ''}>6400-000 (Small Tools)</option>
-                        <option value="6500-000" ${glCode === '6500-000' ? 'selected' : ''}>6500-000 (Office Supplies)</option>
-                        <option value="8200-000" ${glCode === '8200-000' ? 'selected' : ''}>8200-000 (Training & Development)</option>
-                    </select>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save Changes</button>
-                    <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
-                </div>
-            </form>
-        </div>
-    `;
-    
-    // Add modal to page
-    document.body.appendChild(modal);
-    
-    // Setup mileage mode
-    const glCodeSelect = document.getElementById('glCode');
-    const amountLabel = document.getElementById('amount-label');
-    const amountInput = document.getElementById('amount');
-    const taxGroup = document.getElementById('tax-group');
-    const calculatedAmount = document.getElementById('calculated-amount');
-    
-    function updateMileageMode() {
-        if (glCodeSelect.value === '6026-000') {
-            // Mileage mode
-            amountLabel.textContent = 'Kilometers';
-            amountInput.placeholder = 'Enter kilometers';
-            taxGroup.style.display = 'none';
-            calculatedAmount.style.display = 'block';
-            
-            // Calculate amount based on kilometers
-            const km = parseFloat(amountInput.value) || 0;
-            const amount = (km * 0.72).toFixed(2);
-            calculatedAmount.textContent = `Amount: $${amount}`;
-            calculatedAmount.style.color = '#2e7d32';
-            calculatedAmount.style.fontWeight = 'bold';
-            calculatedAmount.style.marginTop = '5px';
-        } else {
-            // Regular expense mode
-            amountLabel.textContent = 'Amount ($)';
-            amountInput.placeholder = 'Enter amount';
-            taxGroup.style.display = 'block';
-            calculatedAmount.style.display = 'none';
-        }
-    }
-    
-    // Initial update
-    updateMileageMode();
-    
-    // Add event listener for G/L code changes
-    glCodeSelect.addEventListener('change', updateMileageMode);
-    
-    // Add event listener for kilometer input
-    amountInput.addEventListener('input', function() {
-        if (glCodeSelect.value === '6026-000') {
-            const km = parseFloat(this.value) || 0;
-            const amount = (km * 0.72).toFixed(2);
-            calculatedAmount.textContent = `Amount: $${amount}`;
-        }
-    });
-    
-    // Close modal
-    const closeBtn = modal.querySelector('.close');
-    closeBtn.addEventListener('click', () => {
-        document.body.removeChild(modal);
-    });
-    
-    // Cancel button
-    const cancelBtn = modal.querySelector('.modal-cancel');
-    cancelBtn.addEventListener('click', () => {
-        document.body.removeChild(modal);
-    });
-    
-    // Form submit
-    const form = modal.querySelector('form');
-    form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        
-        const formData = new FormData(form);
-        const data = {};
-        formData.forEach((value, key) => {
-            data[key] = value;
-        });
-        
-        // Handle mileage calculation
-        if (data.glCode === '6026-000') {
-            data.kilometers = parseFloat(data.amount) || 0;
-            data.amount = (data.kilometers * 0.72).toFixed(2);
-            data.tax = '0.00';
-        }
-        
-        // Show loading indicator
-        const submitBtn = form.querySelector('button[type="submit"]');
-        const originalText = submitBtn.textContent;
-        submitBtn.textContent = 'Saving...';
-        submitBtn.disabled = true;
-        
-        // Make API request to update expense
-        fetch(`/api/expenses/${id}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(errData => {
-                    throw new Error(errData.error || 'Failed to update expense');
-                });
-            }
-            return response.json();
-        })
-        .then(updatedExpense => {
-            console.log('Expense updated:', updatedExpense);
-            
-            // Update row in table
-            row.querySelector('td:nth-child(1)').textContent = data.date;
-            
-            const titleElement = row.querySelector('td:nth-child(2)');
-            titleElement.innerHTML = `
-                <div class="title-text">${data.title}</div>
-                <div class="description-text">${data.description}</div>
-            `;
-            
-            row.querySelector('td:nth-child(3)').textContent = `$${data.amount}`;
-            row.querySelector('td:nth-child(4)').textContent = `$${data.tax || '0.00'}`;
-            
-            const selectElement = row.querySelector('td:nth-child(5) select');
-            if (selectElement) {
-                selectElement.value = data.glCode;
-            }
-            
-            // Close modal
-            document.body.removeChild(modal);
-        })
-        .catch(error => {
-            console.error('Error updating expense:', error);
-            alert(`Error updating expense: ${error.message || 'Please try again'}`);
-            
-            // Reset button
-            submitBtn.textContent = originalText;
-            submitBtn.disabled = false;
-        });
-    });
-}
-
-// Handle Email export (combines Excel and PDF)
-async function handleEmailExport() {
-    if (expenses.length === 0) {
-        showNotification('No expenses to export', 'error');
-        return;
-    }
-    
-    try {
-        // Show loading indicator
-        loadingOverlay.classList.add('active');
-        document.querySelector('.loading-overlay p').textContent = 'Preparing files for email...';
-        
-        // Get the currently filtered expenses or all expenses
-        const dataToExport = filteredExpenses.length > 0 ? filteredExpenses : expenses;
-        
-        // Send request to server to prepare files
-        const response = await fetch('/api/export-email', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                expenses: dataToExport,
-                sessionId: currentSessionId 
-            })
+        const response = await fetch('/api/merge-pdfs', {
+            method: 'POST'
         });
         
         if (!response.ok) {
-            throw new Error('Failed to prepare files for email');
+            throw new Error('Failed to merge PDFs');
         }
         
-        const result = await response.json();
+        // Download the file
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Greenwin_Merged_PDF_${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
         
-        if (!result.success) {
-            throw new Error(result.error || 'Failed to prepare files for email');
-        }
-        
-        // Get file paths from the response
-        const { excelPath, pdfPath } = result;
-        
-        // Get full URLs for the files
-        const fileUrls = [];
-        if (excelPath) {
-            fileUrls.push(`${window.location.origin}${excelPath}`);
-        }
-        if (pdfPath) {
-            fileUrls.push(`${window.location.origin}${pdfPath}`);
-        }
-        
-        // Hide loading indicator
         loadingOverlay.classList.remove('active');
-        
-        // Compose email subject and body
-        const subject = 'Greenwin Expense Report';
-        const body = 'Please find attached the expense report files.';
-        
-        // Attempt to open Outlook directly
-        try {
-            // Use the 'ms-outlook:' protocol to open Outlook with attachments
-            let outlookUrl = `ms-outlook:compose?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-            
-            // Add attachments if we have files
-            if (fileUrls.length > 0) {
-                outlookUrl += `&attachment=${encodeURIComponent(fileUrls.join(','))}`;
-            }
-            
-            // Attempt to open Outlook
-            window.location.href = outlookUrl;
-            
-            // Show a notification about opening Outlook
-            showNotification('Opening Outlook with expense report files...', 'success');
-            
-            // After a short delay, check if Outlook opened successfully
-            setTimeout(() => {
-                // Fallback if Outlook didn't open
-                if (document.hasFocus()) {
-                    console.log('Outlook may not have opened, offering fallback method');
-                    offerFallbackMethod(fileUrls, subject, body);
-                }
-            }, 2000);
-        } catch (outlookError) {
-            console.error('Error opening Outlook:', outlookError);
-            // Fallback to alternative method
-            offerFallbackMethod(fileUrls, subject, body);
-        }
+        showNotification('PDF merged successfully', 'success');
     } catch (error) {
-        console.error('Error preparing email:', error);
+        console.error('Error exporting PDF:', error);
         loadingOverlay.classList.remove('active');
-        showNotification('Failed to prepare email: ' + error.message, 'error');
+        showNotification('Failed to merge PDFs: ' + error.message, 'error');
     }
-}
+} 
 
-// Function to provide a fallback method when Outlook can't be opened
-function offerFallbackMethod(fileUrls, subject, body) {
-    // Create a modal or notification to inform the user
-    const fallbackModal = document.createElement('div');
-    fallbackModal.className = 'modal fade show';
-    fallbackModal.style.display = 'block';
-    fallbackModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
-    
-    fallbackModal.innerHTML = `
-        <div class="modal-dialog" style="margin-top: 100px;">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Outlook Not Detected</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <p>We couldn't open Outlook automatically. Would you like to:</p>
-                    <div class="mt-3">
-                        <button id="download-files-btn" class="btn btn-primary mr-2">
-                            Download Files
-                        </button>
-                        <button id="use-default-email-btn" class="btn btn-secondary">
-                            Use Default Email App
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(fallbackModal);
-    
-    // Add event listeners to buttons
-    document.getElementById('download-files-btn').addEventListener('click', async () => {
-        // Download the files
-        for (const url of fileUrls) {
-            const filename = url.split('/').pop();
-            await downloadFile(url, filename);
-        }
-        
-        fallbackModal.remove();
-        showNotification('Files downloaded successfully. Please attach them to your email manually.', 'success', 10000);
-    });
-    
-    document.getElementById('use-default-email-btn').addEventListener('click', () => {
-        // Use the default mailto link
-        const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        window.location.href = mailtoLink;
-        
-        fallbackModal.remove();
-        showNotification('Default email client opened. Please attach the files manually.', 'info', 10000);
-    });
-    
-    // Close button event
-    fallbackModal.querySelector('.close').addEventListener('click', () => {
-        fallbackModal.remove();
-    });
-}
-
-// Function to download a file
-async function downloadFile(url, filename) {
-    // Create a temporary link element
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.style.display = 'none';
-    
-    // Add the link to the document and trigger the download
-    document.body.appendChild(link);
-    link.click();
-    
-    // Remove the link from the DOM
-    setTimeout(() => {
-        document.body.removeChild(link);
-    }, 100);
-    
-    // Return a promise that resolves after a delay to ensure the download starts
-    return new Promise(resolve => setTimeout(resolve, 500));
-}
-
-// Initialize signature functionality
-function initSignature() {
-    // Canvas drawing signature
-    signatureCanvas = document.getElementById('signature-canvas');
-    if (!signatureCanvas) return;
-    
-    // Fix canvas resolution to match display size
-    const dpr = window.devicePixelRatio || 1;
-    const rect = signatureCanvas.getBoundingClientRect();
-    
-    // Set the canvas dimensions to match its CSS dimensions
-    signatureCanvas.width = rect.width * dpr;
-    signatureCanvas.height = rect.height * dpr;
-    
-    signatureCtx = signatureCanvas.getContext('2d');
-    
-    // Scale the context to account for the device pixel ratio
-    signatureCtx.scale(dpr, dpr);
-    
-    // Set up canvas for drawing
-    signatureCtx.lineWidth = 2;
-    signatureCtx.lineCap = 'round';
-    signatureCtx.strokeStyle = '#000000';
-    
-    // Event listeners for canvas drawing
-    signatureCanvas.addEventListener('mousedown', startDrawing);
-    signatureCanvas.addEventListener('touchstart', handleTouchStart);
-    signatureCanvas.addEventListener('mousemove', draw);
-    signatureCanvas.addEventListener('touchmove', handleTouchMove);
-    signatureCanvas.addEventListener('mouseup', stopDrawing);
-    signatureCanvas.addEventListener('touchend', stopDrawing);
-    signatureCanvas.addEventListener('mouseout', stopDrawing);
-    
-    // Clear button
-    const clearBtn = document.getElementById('clear-signature');
-    if (clearBtn) {
-        clearBtn.addEventListener('click', clearSignature);
-    }
-    
-    // Save drawn signature button
-    const saveDrawnBtn = document.getElementById('save-drawn-signature');
-    if (saveDrawnBtn) {
-        saveDrawnBtn.addEventListener('click', saveDrawnSignature);
-    }
-    
-    // Signature upload
-    const signatureUpload = document.getElementById('signature-upload');
-    if (signatureUpload) {
-        signatureUpload.addEventListener('change', handleSignatureUpload);
-    }
-    
-    // Save uploaded signature button
-    const saveUploadedBtn = document.getElementById('save-uploaded-signature');
-    if (saveUploadedBtn) {
-        saveUploadedBtn.addEventListener('click', saveUploadedSignature);
-    }
-    
-    // Tab switching
-    const drawTab = document.getElementById('draw-tab');
-    const uploadTab = document.getElementById('upload-tab');
-    
-    if (drawTab && uploadTab) {
-        drawTab.addEventListener('click', () => switchSignatureTab('draw'));
-        uploadTab.addEventListener('click', () => switchSignatureTab('upload'));
-    }
-    
-    // Change signature button
-    const changeSignatureBtn = document.getElementById('change-signature');
-    if (changeSignatureBtn) {
-        changeSignatureBtn.addEventListener('click', changeSignature);
-    }
-    
-    // Check for saved signature in localStorage
-    loadSavedSignature();
-    
-    // Add window resize handler to update canvas dimensions
-    window.addEventListener('resize', debounce(function() {
-        // Re-initialize the canvas when the window is resized
-        updateCanvasDimensions();
-    }, 250));
-}
-
-// Update canvas dimensions on resize
-function updateCanvasDimensions() {
-    if (!signatureCanvas) return;
-    
-    const dpr = window.devicePixelRatio || 1;
-    const rect = signatureCanvas.getBoundingClientRect();
-    
-    // Save current drawing
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = signatureCanvas.width;
-    tempCanvas.height = signatureCanvas.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    tempCtx.drawImage(signatureCanvas, 0, 0);
-    
-    // Resize canvas
-    signatureCanvas.width = rect.width * dpr;
-    signatureCanvas.height = rect.height * dpr;
-    
-    // Restore context settings
-    signatureCtx = signatureCanvas.getContext('2d');
-    signatureCtx.scale(dpr, dpr);
-    signatureCtx.lineWidth = 2;
-    signatureCtx.lineCap = 'round';
-    signatureCtx.strokeStyle = '#000000';
-    
-    // Restore drawing
-    signatureCtx.drawImage(tempCanvas, 0, 0, signatureCanvas.width, signatureCanvas.height);
-}
-
-// Handle touch events for mobile drawing
-function handleTouchStart(e) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const rect = signatureCanvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    
-    isDrawing = true;
-    signatureCtx.beginPath();
-    signatureCtx.moveTo(x, y);
-}
-
-function handleTouchMove(e) {
-    if (!isDrawing) return;
-    e.preventDefault();
-    
-    const touch = e.touches[0];
-    const rect = signatureCanvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    
-    signatureCtx.lineTo(x, y);
-    signatureCtx.stroke();
-}
-
-// Start drawing on canvas
-function startDrawing(e) {
-    isDrawing = true;
-    
-    const rect = signatureCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    signatureCtx.beginPath();
-    signatureCtx.moveTo(x, y);
-}
-
-// Draw on canvas as mouse/touch moves
-function draw(e) {
-    if (!isDrawing) return;
-    
-    const rect = signatureCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    signatureCtx.lineTo(x, y);
-    signatureCtx.stroke();
-    
-    // Hide the "Sign here" instructions once drawing starts
-    const instructions = document.querySelector('.signature-instructions');
-    if (instructions) {
-        instructions.style.display = 'none';
-    }
-}
-
-// Stop drawing
-function stopDrawing() {
-    isDrawing = false;
-}
-
-// Clear the signature canvas
-function clearSignature() {
-    signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
-    
-    // Show the "Sign here" instructions again
-    const instructions = document.querySelector('.signature-instructions');
-    if (instructions) {
-        instructions.style.display = 'flex';
-    }
-}
-
-// Save the drawn signature
-function saveDrawnSignature() {
-    // Check if canvas is empty
-    const isCanvasEmpty = isSignatureCanvasEmpty();
-    if (isCanvasEmpty) {
-        showNotification('Please draw your signature first', 'error');
-        return;
-    }
-    
-    // Create a temporary canvas with white background for better visibility in Excel
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = signatureCanvas.width;
-    tempCanvas.height = signatureCanvas.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    
-    // Fill with white background
-    tempCtx.fillStyle = 'white';
-    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-    
-    // Draw the signature on top
-    tempCtx.drawImage(signatureCanvas, 0, 0);
-    
-    // Convert enhanced canvas to base64 image with white background
-    const signatureData = tempCanvas.toDataURL('image/png');
-    
-    // Save signature to localStorage
-    saveSignature(signatureData);
-    
-    console.log('Signature saved with white background');
-}
-
-// Check if the signature canvas is empty
-function isSignatureCanvasEmpty() {
-    const pixelData = signatureCtx.getImageData(0, 0, signatureCanvas.width, signatureCanvas.height).data;
-    
-    // Check if all pixels are transparent (alpha = 0)
-    for (let i = 3; i < pixelData.length; i += 4) {
-        if (pixelData[i] > 0) {
-            return false; // Found a non-transparent pixel
-        }
-    }
-    
-    return true; // Canvas is empty
-}
-
-// Handle signature image upload
-function handleSignatureUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    // Validate file type
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-        showNotification('Please upload a PNG or JPG image', 'error');
-        return;
-    }
-    
-    // Validate file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-        showNotification('Signature image must be less than 2MB', 'error');
-        return;
-    }
-    
-    // Show preview
-    const reader = new FileReader();
-    reader.onload = function(event) {
-        const previewContainer = document.getElementById('signature-preview-container');
-        const preview = document.getElementById('signature-preview');
-        
-        if (previewContainer && preview) {
-            preview.src = event.target.result;
-            previewContainer.style.display = 'block';
-        }
-    };
-    reader.readAsDataURL(file);
-}
-
-// Save the uploaded signature image
-function saveUploadedSignature() {
-    const preview = document.getElementById('signature-preview');
-    if (!preview || !preview.src || preview.src === '') {
-        showNotification('Please upload a signature image first', 'error');
-        return;
-    }
-    
-    // Save signature to localStorage
-    saveSignature(preview.src);
-}
-
-// Save signature to localStorage and update UI
-function saveSignature(signatureData) {
-    // Save to localStorage
-    localStorage.setItem('userSignature', signatureData);
-    userSignature = signatureData;
-    
-    // Update UI to show current signature
-    showCurrentSignature();
-    
-    showNotification('Signature saved successfully', 'success');
-}
-
-// Load saved signature from localStorage
-function loadSavedSignature() {
-    const savedSignature = localStorage.getItem('userSignature');
-    if (savedSignature) {
-        userSignature = savedSignature;
-        showCurrentSignature();
-    }
-}
-
-// Show the current saved signature
-function showCurrentSignature() {
-    const drawPanel = document.getElementById('draw-signature-panel');
-    const uploadPanel = document.getElementById('upload-signature-panel');
-    const currentContainer = document.getElementById('current-signature-container');
-    const currentSignatureImg = document.getElementById('current-signature');
-    
-    if (drawPanel && uploadPanel && currentContainer && currentSignatureImg) {
-        // Hide signature panels
-        drawPanel.classList.remove('active');
-        uploadPanel.classList.remove('active');
-        
-        // Show current signature container
-        currentContainer.style.display = 'block';
-        currentSignatureImg.src = userSignature;
-    }
-}
-
-// Change signature (remove current and show options again)
-function changeSignature() {
-    const drawPanel = document.getElementById('draw-signature-panel');
-    const drawTab = document.getElementById('draw-tab');
-    const uploadPanel = document.getElementById('upload-signature-panel');
-    const uploadTab = document.getElementById('upload-tab');
-    const currentContainer = document.getElementById('current-signature-container');
-    
-    if (drawPanel && uploadPanel && currentContainer) {
-        // Show drawing panel and tab
-        drawPanel.classList.add('active');
-        drawTab.classList.add('active');
-        
-        // Hide upload panel and tab
-        uploadPanel.classList.remove('active');
-        uploadTab.classList.remove('active');
-        
-        // Hide current signature container
-        currentContainer.style.display = 'none';
-        
-        // Clear the canvas
-        clearSignature();
-    }
-}
-
-// Switch between draw and upload tabs
-function switchSignatureTab(tab) {
-    const drawPanel = document.getElementById('draw-signature-panel');
-    const drawTab = document.getElementById('draw-tab');
-    const uploadPanel = document.getElementById('upload-signature-panel');
-    const uploadTab = document.getElementById('upload-tab');
-    
-    if (drawPanel && uploadPanel && drawTab && uploadTab) {
-        if (tab === 'draw') {
-            drawPanel.classList.add('active');
-            drawTab.classList.add('active');
-            uploadPanel.classList.remove('active');
-            uploadTab.classList.remove('active');
-        } else {
-            uploadPanel.classList.add('active');
-            uploadTab.classList.add('active');
-            drawPanel.classList.remove('active');
-            drawTab.classList.remove('active');
-        }
-    }
-}
-
-// Reset all data
-function resetAllData() {
-    // Show confirmation dialog
-    if (!confirm("Are you sure you want to reset all data? This will clear all expenses, signatures, and form inputs.")) {
-        return; // User cancelled
-    }
-    
-    // Show loading indicator
-    loadingOverlay.classList.add('active');
-    document.querySelector('.loading-overlay p').textContent = 'Resetting application...';
-    
-    try {
-        // 1. Clear expenses
-        expenses = [];
-        filteredExpenses = [];
-        renderExpenses();
-        updateTotalAmount();
-        
-        // 2. Clear signature
-        if (signatureCanvas && signatureCtx) {
-            clearSignature();
-            localStorage.removeItem('userSignature');
-            userSignature = null;
-            
-            // Reset signature UI
-            const drawPanel = document.getElementById('draw-signature-panel');
-            const drawTab = document.getElementById('draw-tab');
-            const uploadPanel = document.getElementById('upload-signature-panel');
-            const uploadTab = document.getElementById('upload-tab');
-            const currentContainer = document.getElementById('current-signature-container');
-            
-            if (drawPanel && uploadPanel && currentContainer) {
-                drawPanel.classList.add('active');
-                drawTab.classList.add('active');
-                uploadPanel.classList.remove('active');
-                uploadTab.classList.remove('active');
-                currentContainer.style.display = 'none';
-            }
-        }
-        
-        // 3. Reset form inputs
-        const nameInput = document.getElementById('user-name');
-        const departmentInput = document.getElementById('user-department');
-        const pdfFileInput = document.getElementById('pdf-file');
-        
-        if (nameInput) nameInput.value = '';
-        if (departmentInput) departmentInput.value = '';
-        if (pdfFileInput) pdfFileInput.value = '';
-        
-        // 4. Clear results container
-        const resultsContainer = document.getElementById('pdf-results-container');
-        if (resultsContainer) resultsContainer.innerHTML = '';
-        
-        // 5. Clear upload status
-        const uploadStatus = document.getElementById('pdf-upload-status');
-        if (uploadStatus) uploadStatus.innerHTML = '';
-        
-        // 6. Reset session ID
-        currentSessionId = null;
-        
-        // Hide loading indicator
-        loadingOverlay.classList.remove('active');
-        
-        // Show success notification
-        showNotification('Application reset successfully', 'success');
-        
-    } catch (error) {
-        console.error('Error resetting application:', error);
-        loadingOverlay.classList.remove('active');
-        showNotification('Failed to reset application: ' + error.message, 'error');
-    }
-}
-
-// Handle file input change to update the selected files display
-const fileInput = document.getElementById('pdf-file');
-const selectedFilesContainer = document.querySelector('.selected-files');
-const selectedFilesText = document.querySelector('.files-text');
-
-if (fileInput) {
-    fileInput.addEventListener('change', function() {
-        if (this.files.length > 0) {
-            selectedFilesContainer.style.display = 'flex';
-            if (this.files.length === 1) {
-                selectedFilesText.innerHTML = `<span class="files-count">1</span> file selected: ${this.files[0].name}`;
-            } else {
-                selectedFilesText.innerHTML = `<span class="files-count">${this.files.length}</span> files selected`;
-            }
-        } else {
-            selectedFilesContainer.style.display = 'none';
-            selectedFilesText.textContent = 'No files selected';
-        }
-    });
-}
-
-// Add drag and drop functionality
-const uploadArea = document.querySelector('.upload-area');
-if (uploadArea && fileInput) {
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, preventDefaults, false);
-    });
-    
-    function preventDefaults(e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
-    
-    ['dragenter', 'dragover'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, highlight, false);
-    });
-    
-    ['dragleave', 'drop'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, unhighlight, false);
-    });
-    
-    function highlight() {
-        uploadArea.classList.add('highlight');
-    }
-    
-    function unhighlight() {
-        uploadArea.classList.remove('highlight');
-    }
-    
-    uploadArea.addEventListener('drop', handleDrop, false);
-    
-    function handleDrop(e) {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        fileInput.files = files;
-        
-        // Trigger change event manually
-        const event = new Event('change');
-        fileInput.dispatchEvent(event);
-    }
-}
-
-// Update expense location
-async function updateExpenseLocation(expenseId, newLocation) {
-    try {
-        // Find the expense in our local state
-        const expense = expenses.find(exp => exp.id === expenseId);
-        if (!expense) return;
-        
-        // Update local state first for immediate feedback
-        expense.location = newLocation;
-        
-        // Update the expense on the server
-        const response = await fetch(`/api/expenses/${expenseId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(expense)
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to update expense location');
-        }
-        
-        // No need to re-render, just updating a field
-        showNotification('Location updated successfully', 'success');
-    } catch (error) {
-        console.error('Error updating expense location:', error);
-        showNotification('Failed to update location', 'error');
-        
-        // Revert changes in case of error
-        fetchExpenses();
-    }
-}
-
-// Add a split row to the split container
-function addSplitRow(glCode = '', amount = '', percentage = '') {
-    const splitContainer = document.getElementById('split-container');
-    const splitSummary = document.getElementById('split-summary');
-    
-    if (!splitContainer) return;
-    
-    // Generate a unique ID for this split row
-    const splitId = 'split-' + Date.now();
-    
-    // Create a new split row
-    const splitRow = document.createElement('div');
-    splitRow.className = 'split-row';
-    splitRow.dataset.id = splitId;
-    
-    // Create the HTML for the split row
-    splitRow.innerHTML = `
-        <div class="split-row-content">
-            <div class="split-gl-code">
-                <select class="split-gl-select">
-                    <option value="">Select G/L Code</option>
-                    <option value="6408-000" ${glCode === '6408-000' ? 'selected' : ''}>6408-000 (Office & General)</option>
-                    <option value="6402-000" ${glCode === '6402-000' ? 'selected' : ''}>6402-000 (Membership)</option>
-                    <option value="6404-000" ${glCode === '6404-000' ? 'selected' : ''}>6404-000 (Subscriptions)</option>
-                    <option value="7335-000" ${glCode === '7335-000' ? 'selected' : ''}>7335-000 (Education)</option>
-                    <option value="6010-000" ${glCode === '6010-000' ? 'selected' : ''}>6010-000 (Food & Ent.)</option>
-                    <option value="6011-000" ${glCode === '6011-000' ? 'selected' : ''}>6011-000 (Social)</option>
-                    <option value="6012-000" ${glCode === '6012-000' ? 'selected' : ''}>6012-000 (Travel)</option>
-                    <option value="other">Other</option>
-                </select>
-                <input type="text" class="split-custom-gl" placeholder="Custom G/L code" style="display: none;" value="">
-            </div>
-            <div class="split-amount">
-                <div class="split-amount-inputs">
-                    <div class="split-dollar">
-                        <span class="dollar-sign">$</span>
-                        <input type="number" class="split-amount-input" placeholder="0.00" step="0.01" min="0" value="${amount}">
-                    </div>
-                    <div class="split-percent">
-                        <input type="number" class="split-percent-input" placeholder="0" step="1" min="0" max="100" value="${percentage}">
-                        <span class="percent-sign">%</span>
-                    </div>
-                </div>
-            </div>
-            <div class="split-actions">
-                <button type="button" class="btn-remove-split" data-id="${splitId}"><i class="fas fa-trash"></i></button>
-            </div>
-        </div>
-    `;
-    
-    // Add the split row to the container
-    splitContainer.appendChild(splitRow);
-    
-    // Show the split summary if there's at least one split
-    if (splitContainer.children.length > 0) {
-        splitSummary.style.display = 'block';
-    }
-    
-    // Add event listeners for this split row
-    const removeBtn = splitRow.querySelector('.btn-remove-split');
-    const glSelect = splitRow.querySelector('.split-gl-select');
-    const customGlInput = splitRow.querySelector('.split-custom-gl');
-    const amountInput = splitRow.querySelector('.split-amount-input');
-    const percentInput = splitRow.querySelector('.split-percent-input');
-    
-    // Remove button
-    removeBtn.addEventListener('click', function() {
-        removeSplitRow(splitId);
-    });
-    
-    // G/L code select
-    glSelect.addEventListener('change', function() {
-        if (this.value === 'other') {
-            customGlInput.style.display = 'block';
-            customGlInput.required = true;
-        } else {
-            customGlInput.style.display = 'none';
-            customGlInput.required = false;
-        }
-        updateSplitTotals();
-    });
-    
-    // Amount input
-    amountInput.addEventListener('input', function() {
-        const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
-        const amount = parseFloat(this.value) || 0;
-        
-        // Calculate the percentage
-        if (totalAmount > 0) {
-            const percent = (amount / totalAmount) * 100;
-            percentInput.value = percent.toFixed(0);
-        }
-        
-        updateSplitTotals();
-    });
-    
-    // Percentage input
-    percentInput.addEventListener('input', function() {
-        const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
-        const percent = parseFloat(this.value) || 0;
-        
-        // Calculate the amount
-        if (totalAmount > 0) {
-            const amount = (percent / 100) * totalAmount;
-            amountInput.value = amount.toFixed(2);
-        }
-        
-        updateSplitTotals();
-    });
-    
-    // Set initial values if provided
-    if (glCode && glCode !== '') {
-        if (['6408-000', '6402-000', '6404-000', '7335-000', '6010-000', '6011-000', '6012-000'].includes(glCode)) {
-            glSelect.value = glCode;
-        } else {
-            glSelect.value = 'other';
-            customGlInput.style.display = 'block';
-            customGlInput.value = glCode;
-        }
-    }
-    
-    // Update totals after adding the row
-    updateSplitTotals();
-    
-    return splitRow;
-}
-
-// Remove a split row
-function removeSplitRow(splitId) {
-    const splitRow = document.querySelector(`.split-row[data-id="${splitId}"]`);
-    const splitContainer = document.getElementById('split-container');
-    const splitSummary = document.getElementById('split-summary');
-    
-    if (splitRow && splitContainer) {
-        // Remove the row
-        splitContainer.removeChild(splitRow);
-        
-        // Hide summary if no splits left
-        if (splitContainer.children.length === 0) {
-            splitSummary.style.display = 'none';
-        }
-        
-        // Update totals
-        updateSplitTotals();
-    }
-}
-
-// Update the split totals
-function updateSplitTotals() {
-    const splitContainer = document.getElementById('split-container');
-    const splitAllocatedAmount = document.getElementById('split-allocated-amount');
-    const splitAllocatedPercent = document.getElementById('split-allocated-percent');
-    const splitRemainingAmount = document.getElementById('split-remaining-amount');
-    const splitRemainingPercent = document.getElementById('split-remaining-percent');
-    
-    if (!splitContainer || !splitAllocatedAmount || !splitAllocatedPercent || !splitRemainingAmount || !splitRemainingPercent) {
-        return;
-    }
-    
-    // Get total expense amount
-    const totalAmount = parseFloat(document.getElementById('edit-amount').value) || 0;
-    
-    // Calculate allocated amount from all splits
-    let allocatedAmount = 0;
-    
-    // Loop through all split rows
-    const splitRows = splitContainer.querySelectorAll('.split-row');
-    splitRows.forEach(row => {
-        const amountInput = row.querySelector('.split-amount-input');
-        const amount = parseFloat(amountInput.value) || 0;
-        allocatedAmount += amount;
-    });
-    
-    // Ensure allocated amount doesn't exceed total
-    if (allocatedAmount > totalAmount) {
-        allocatedAmount = totalAmount;
-    }
-    
-    // Calculate remaining amount
-    const remainingAmount = totalAmount - allocatedAmount;
-    
-    // Calculate percentages
-    const allocatedPercent = totalAmount > 0 ? (allocatedAmount / totalAmount) * 100 : 0;
-    const remainingPercent = totalAmount > 0 ? (remainingAmount / totalAmount) * 100 : 0;
-    
-    // Update the summary display
-    splitAllocatedAmount.textContent = `$${allocatedAmount.toFixed(2)}`;
-    splitAllocatedPercent.textContent = `${allocatedPercent.toFixed(0)}%`;
-    splitRemainingAmount.textContent = `$${remainingAmount.toFixed(2)}`;
-    splitRemainingPercent.textContent = `${remainingPercent.toFixed(0)}%`;
-}
-
-// ... existing code ... 

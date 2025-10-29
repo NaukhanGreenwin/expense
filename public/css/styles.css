@@ -288,9 +288,9 @@ textarea:focus {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: 2rem;
     flex-wrap: wrap;
-    gap: 1rem;
+    gap: 1.5rem;
 }
 
 .expenses-header h2 {
@@ -304,8 +304,9 @@ textarea:focus {
 .expenses-actions {
     display: flex;
     gap: 1rem;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     margin-left: auto;
+    align-items: center;
 }
 
 .expenses-filter {
@@ -323,27 +324,37 @@ textarea:focus {
 }
 
 .expenses-summary {
-    margin-left: auto;
-    font-weight: 500;
+    font-weight: 600;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.75rem;
+    padding: 1rem 2rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    color: white;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    font-size: 1.1rem;
 }
 
 #expenses-total {
-    color: var(--primary-color);
-    font-size: 1.2rem;
-    font-weight: 600;
+    color: white;
+    font-size: 1.5rem;
+    font-weight: 700;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .expenses-table-container {
     overflow-x: auto;
     border-radius: 12px;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+    width: 100%;
+    margin-top: 1rem;
 }
 
 table {
     width: 100%;
+    min-width: 1000px;
     border-collapse: separate;
     border-spacing: 0;
     border-radius: 12px;
@@ -351,46 +362,62 @@ table {
 }
 
 th, td {
-    padding: 12px 15px;
-    border-bottom: 1px solid var(--border-color);
+    padding: 18px 20px;
+    border-bottom: 1px solid #f0f0f5;
     vertical-align: middle;
+    text-align: left;
 }
 
 th {
-    font-weight: 600;
-    color: var(--dark-color);
-    background-color: #f5f5f7;
+    font-weight: 700;
+    color: #1d1d1f;
+    background: linear-gradient(to bottom, #fafafa 0%, #f5f5f7 100%);
     position: sticky;
     top: 0;
     z-index: 10;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 3px solid #e1e1e6;
+    white-space: nowrap;
+    box-sizing: border-box;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
 }
 
 td {
     border-bottom: 1px solid var(--border-color);
+    box-sizing: border-box;
 }
 
 tr:last-child td {
     border-bottom: none;
 }
 
-tr:hover {
-    background-color: rgba(0, 0, 0, 0.02);
+tbody tr {
+    transition: all 0.3s ease;
+}
+
+tbody tr:hover {
+    background-color: rgba(102, 126, 234, 0.04);
+    transform: translateX(4px);
+    box-shadow: -4px 0 0 0 #667eea;
 }
 
 .category-badge {
     display: inline-block;
-    padding: 0.25rem 0.75rem;
-    border-radius: 20px;
+    padding: 0.4rem 1rem;
+    border-radius: 8px;
     font-size: 0.8rem;
-    font-weight: 500;
-    background-color: var(--light-accent);
-    color: var(--dark-color);
+    font-weight: 600;
+    background-color: #e8f4f8;
+    color: #0071e3;
+    border: 1px solid #d0e9f0;
 }
 
 .action-buttons {
     display: flex;
     gap: 0.8rem;
+    justify-content: center;
+    align-items: center;
 }
 
 .btn-edit, .btn-delete {
@@ -407,13 +434,23 @@ tr:hover {
 }
 
 .btn-edit {
-    background-color: rgba(255, 204, 0, 0.1);
-    color: #ff9500;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.btn-edit:hover {
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
 }
 
 .btn-delete {
-    background-color: rgba(255, 59, 48, 0.1);
-    color: var(--danger-color);
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(245, 87, 108, 0.3);
+}
+
+.btn-delete:hover {
+    box-shadow: 0 4px 12px rgba(245, 87, 108, 0.5);
 }
 
 .btn-edit:hover, .btn-delete:hover {
@@ -423,12 +460,14 @@ tr:hover {
 /* Main Content Layout */
 main.container {
     display: grid;
-    grid-template-columns: 350px 1fr;
-    gap: 1.5rem;
+    grid-template-columns: 380px 1fr;
+    gap: 2rem;
     padding-top: 2.5rem;
     padding-bottom: 2.5rem;
-    max-width: 1600px;
+    max-width: 100%;
     margin: 0 auto;
+    padding-left: 2rem;
+    padding-right: 2rem;
 }
 
 /* PDF Upload Section */
@@ -447,13 +486,15 @@ main.container {
 /* Expenses List Section */
 .expenses-list-container {
     background-color: white;
-    border-radius: 18px;
+    border-radius: 20px;
     padding: 2.5rem;
-    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
     flex: 1;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 .expenses-list-container::before {
@@ -681,12 +722,13 @@ footer a:hover {
 }
 
 .expense-description {
-    margin-top: 5px;
-    color: var(--dark-color);
-    font-size: 0.9rem;
-    line-height: 1.4;
+    margin-top: 0.35rem;
+    color: #6e6e73;
+    font-size: 0.875rem;
+    line-height: 1.5;
     white-space: normal;
     word-wrap: break-word;
+    font-weight: 400;
 }
 
 .expense-split-summary {
@@ -875,21 +917,7 @@ select.gl-dropdown {
     box-shadow: 0 0 0 2px rgba(0, 128, 0, 0.1);
 }
 
-/* Ensure G/L code column has enough width */
-#expenses-table th:nth-child(5),
-#expenses-table td:nth-child(5) {
-    min-width: 160px;
-    width: auto;
-}
-
-/* Format monetary values in the table */
-#expenses-table td:nth-child(3),
-#expenses-table td:nth-child(4) {
-    text-align: right;
-    padding-right: 20px;
-    font-variant-numeric: tabular-nums;
-    font-weight: 500;
-}
+/* Removed - now handled in main column specifications above */
 
 /* Static tax value styling */
 .tax-value {
@@ -1124,12 +1152,11 @@ select.gl-dropdown {
     opacity: 0.6;
 }
 
-/* Table cell styles for Name and Department */
-#expenses-table td:nth-child(2),
-#expenses-table td:nth-child(3) {
+/* Table cell styles for Merchant column */
+#expenses-table td:nth-child(2) {
     font-size: 0.95rem;
     color: var(--dark-color);
-    min-width: 100px;
+    min-width: 200px;
 }
 
 /* Make the table responsive with smaller screens */
@@ -1210,62 +1237,93 @@ select.gl-dropdown {
     }
 }
 
-/* Table Layout - Improved column widths */
+/* Table Layout - Fixed alignment */
 #expenses-table {
     width: 100%;
-    table-layout: fixed;
+    table-layout: auto;
+    border-collapse: separate;
+    border-spacing: 0;
 }
 
-/* Column width specifications */
-#expenses-table th:nth-child(1) {
-    width: 100px; /* Date */
+/* Column width specifications - Updated for 6 columns (Location removed) */
+#expenses-table th:nth-child(1),
+#expenses-table td:nth-child(1) {
+    width: 120px;
+    min-width: 120px;
 }
 
-#expenses-table th:nth-child(2) {
-    width: 200px; /* Merchant */
+#expenses-table th:nth-child(2),
+#expenses-table td:nth-child(2) {
+    width: 35%;
+    min-width: 250px;
 }
 
 #expenses-table th:nth-child(3),
-#expenses-table th:nth-child(4) {
-    width: 100px; /* Amount, Tax */
+#expenses-table td:nth-child(3) {
+    width: 130px;
+    min-width: 130px;
+}
+
+#expenses-table th:nth-child(4),
+#expenses-table td:nth-child(4) {
+    width: 130px;
+    min-width: 130px;
+}
+
+#expenses-table th:nth-child(5),
+#expenses-table td:nth-child(5) {
+    width: 200px;
+    min-width: 200px;
+}
+
+#expenses-table th:nth-child(6),
+#expenses-table td:nth-child(6) {
+    width: 120px;
+    min-width: 120px;
+}
+
+/* Right-align Amount and Tax data cells only */
+#expenses-table td:nth-child(3),
+#expenses-table td:nth-child(4) {
     text-align: right;
 }
 
-#expenses-table th:nth-child(5) {
-    width: 160px; /* G/L Code */
-}
-
-#expenses-table th:nth-child(6) {
-    width: 200px; /* Location */
-}
-
-#expenses-table th:nth-child(7) {
-    width: 100px; /* Actions */
+/* Center-align Actions column data cells only */
+#expenses-table td:nth-child(6) {
     text-align: center;
 }
 
 /* Ensure merchant descriptions don't expand too much */
 .merchant-name {
-    font-weight: 600;
-    font-size: 1rem;
-    color: var(--dark-color);
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #1d1d1f;
     white-space: normal;
-    line-height: 1.4;
+    line-height: 1.5;
+    margin-bottom: 0.25rem;
 }
 
 .expense-description {
-    margin-top: 5px;
-    color: var(--dark-color);
-    font-size: 0.9rem;
-    line-height: 1.4;
+    margin-top: 0.35rem;
+    color: #6e6e73;
+    font-size: 0.875rem;
+    line-height: 1.5;
     white-space: normal;
     word-wrap: break-word;
+    font-weight: 400;
 }
 
 /* Format monetary values in the table with consistent alignment */
 #expenses-table td:nth-child(3),
 #expenses-table td:nth-child(4) {
-    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Date column styling */
+#expenses-table td:nth-child(1) {
+    font-weight: 500;
+    color: #6e6e73;
+    font-size: 0.9rem;
 }
 
 /* Header */
