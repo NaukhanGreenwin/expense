@@ -74,8 +74,12 @@ const openai = new OpenAI({
 const app = express();
 const PORT = process.env.PORT || 3005;
 
-// Security middleware
-app.use(helmet());
+// Security middleware (allow cross-origin images like the Greenwin logo)
+app.use(helmet({
+  contentSecurityPolicy: false, // we are not setting an explicit CSP here
+  crossOriginEmbedderPolicy: false, // allow embedding cross-origin resources without CORP/CORS
+  crossOriginResourcePolicy: { policy: 'cross-origin' } // permit loading images from external CDNs
+}));
 
 // Enable CORS with optional restriction via env
 const allowedOrigin = process.env.ALLOWED_ORIGIN;
