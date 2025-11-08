@@ -17,6 +17,7 @@ const cors = require('cors'); // Add CORS middleware
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { supabase } = require('./supabaseClient');
+const { fromPath: pdf2imgFromPath } = require('pdf2pic');
 // In-memory store no longer used; persisting to Supabase DB
 
 // Avoid logging sensitive environment details
@@ -397,136 +398,69 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                   }
                 }
                 
-                // Process with OpenAI API - Using GPT-4o for maximum intelligence and speed
-                const openaiResponse = await withRetry(() => openai.chat.completions.create({
+                // Process with OpenAI API (text first; fallback to Vision on first page image)
+                let openaiContent;
+                if (pdfText && pdfText.trim().length >= 20) {
+                  const openaiResponse = await withRetry(() => openai.chat.completions.create({
                     model: "gpt-4o",
                     messages: [
-                        {
-                            role: "system", 
-                            content: `You are an advanced AI assistant specialized in extracting and categorizing expense information from receipts and invoices for Greenwin Corp. Analyze documents with precision and intelligence, automatically detecting patterns and context. Your task is to extract key expense details with the highest accuracy possible.
-
-                            REQUIRED FIELDS (all must be present):
-                            - date: Extract in YYYY-MM-DD format. If only month/day are shown, use the current year.
-                            - merchant: The vendor/company name from the receipt
-                            - amount: Total amount including tax (as a number)
-                            - tax: HST/GST amount if explicitly shown (as a number)
-                            - description: Brief summary of purchased items/services
-                            - gl_code: Most appropriate G/L code from the provided list
-                            
-                            OPTIONAL FIELDS (include if found):
-                            - line_items: Detailed list of purchased items with amounts
-
-                            G/L CODE SELECTION RULES:
-                            6408-000 (Office & General):
-                            - Office supplies, equipment, furniture
-                            - Administrative expenses
-                            - General business supplies
-                            - Cleaning supplies
-                            - Printer supplies
-
-                            6402-000 (Membership):
-                            - Professional association fees
-                            - Industry memberships
-                            - Chamber of commerce
-                            - Trade organization dues
-
-                            6404-000 (Subscriptions):
-                            - Software licenses
-                            - Cloud services
-                            - Digital subscriptions
-                            - Online tools
-                            - Microsoft/Adobe products
-                            - Zoom/Teams subscriptions
-
-                            7335-000 (Education & Development):
-                            - Training courses
-                            - Professional certifications
-                            - Workshops
-                            - Conferences
-                            - Educational materials
-                            - Skill development programs
-
-                            6026-000 (Mileage/ETR):
-                            - Vehicle mileage
-                            - Toll fees
-                            - Parking fees
-                            - Public transit
-                            - Vehicle maintenance
-
-                            6010-000 (Food & Entertainment):
-                            - Business meals
-                            - Client lunches/dinners
-                            - Coffee meetings
-                            - Catering
-                            - Restaurant expenses
-                            - Food for meetings
-
-                            6011-000 (Social):
-                            - Team building events
-                            - Company celebrations
-                            - Holiday parties
-                            - Employee events
-                            - Team activities
-
-                            6012-000 (Travel Expenses):
-                            - Airfare
-                            - Hotels
-                            - Taxis/Uber/Lyft
-                            - Car rentals
-                            - Travel insurance
-                            - Baggage fees
-
-                            CRITICAL INTELLIGENCE RULES:
-                            1. SMART TAX DETECTION: For Canadian receipts, intelligently identify HST/GST/PST. If not shown, calculate based on regional rates.
-                            2. CONTEXT AWARENESS: Analyze receipt context - restaurant, retail, service, etc. - to improve categorization.
-                            3. DATE INTELLIGENCE: For incomplete dates, infer the most likely year/month based on context.
-                            4. MERCHANT RECOGNITION: Extract official business name and clean up formatting (remove extra spaces, special characters).
-                            5. CONCISE DESCRIPTIONS: Write brief, one-line descriptions (max 8-10 words). Be clear and professional but concise. Focus on:
-                               - Main service/product only
-                               - Key purpose in 5-10 words
-                               - No lists or excessive details
-                               Example: "September Azure cloud services and Veeam backup"
-                               NOT: "Monthly billing for September including Azure Storage, Data Factory, SQL Database, Microsoft Defender, Virtual Machines, Virtual Network, Bandwidth, and Veeam Backup"
-                            6. ADVANCED G/L MATCHING: Use semantic understanding to assign the most accurate G/L code based on merchant type AND items purchased.
-                            7. PATTERN RECOGNITION: Learn from common expense patterns (e.g., coffee shop = Food & Entertainment).
-                            8. CONFIDENCE: Only include fields you're highly confident about. Skip uncertain data rather than guessing.
-
-                            Format your response as a JSON object with these exact field names:
-                            {
-                                "date": "YYYY-MM-DD",
-                                "merchant": "string",
-                                "amount": number,
-                                "tax": number (optional),
-                                "description": "string",
-                                "gl_code": "string",
-                                "location": "string" (optional),
-                                "line_items": [
-                                    {
-                                        "name": "string",
-                                        "amount": number
-                                    }
-                                ]
-                            }`
-                        },
-                        {
-                            role: "user",
-                            content: `Intelligently analyze and extract expense information from this receipt/invoice. Use context clues, pattern recognition, and semantic understanding. 
-                            
-                            CRITICAL: Keep descriptions SHORT - max 8-10 words, one line only. Be concise and professional. Example: "Azure cloud services for September" NOT long lists.
-                            
-                            Return precise, structured data in the exact JSON format specified:\n\n${pdfText}`
-                        }
+                      { role: "system", content: `You are an advanced AI assistant specialized in extracting and categorizing expense information from receipts and invoices for Greenwin Corp. Analyze documents with precision and intelligence. Return a single JSON object with fields: date (YYYY-MM-DD), merchant, amount (number), tax (number, optional), description (<=10 words), gl_code.` },
+                      { role: "user", content: `Extract structured fields from this receipt text. Keep descriptions short.\n\n${pdfText}` }
                     ],
                     response_format: { type: "json_object" },
-                    temperature: 0.1, // Low for concise, consistent descriptions
-                    max_tokens: 500, // Reduced for short descriptions
-                    top_p: 0.95 // Focus on most likely tokens for faster processing
-                }), { retries: 3, baseMs: 600 });
+                    temperature: 0.1,
+                    max_tokens: 400,
+                    top_p: 0.95
+                  }), { retries: 3, baseMs: 600 });
+                  openaiContent = openaiResponse.choices[0].message.content;
+                } else {
+                  // Vision fallback: convert first page to JPEG and send to GPT-4o
+                  let imgBase64 = null;
+                  try {
+                    const conv = pdf2imgFromPath(file.path, { density: 200, saveFilename: `${uuidv4()}_page`, savePath: TEMP_DIR, format: 'jpg', quality: 85 });
+                    const page1 = await conv(1);
+                    const imgPath = page1.path || page1;
+                    const imgBuf = await fsPromises.readFile(imgPath);
+                    imgBase64 = imgBuf.toString('base64');
+                    try { await fsPromises.unlink(imgPath); } catch(_) {}
+                  } catch (convErr) {
+                    console.warn('PDF->image conversion failed:', convErr.message);
+                  }
+                  if (imgBase64) {
+                    const visionResp = await withRetry(() => openai.chat.completions.create({
+                      model: 'gpt-4o',
+                      messages: [
+                        { role: 'system', content: 'Extract structured receipt data as a single JSON object with fields: date (YYYY-MM-DD), merchant, amount (number), tax (number, optional), description (<=10 words), gl_code.' },
+                        { role: 'user', content: [
+                            { type: 'text', text: 'Extract fields from this receipt image. Return only JSON.' },
+                            { type: 'image_url', image_url: `data:image/jpeg;base64,${imgBase64}` }
+                          ] }
+                      ],
+                      response_format: { type: 'json_object' },
+                      temperature: 0.1,
+                      max_tokens: 400
+                    }), { retries: 3, baseMs: 600 });
+                    openaiContent = visionResp.choices[0].message.content;
+                  } else {
+                    // Last resort: try text path even if empty (may still work with hints)
+                    const fallbackResp = await withRetry(() => openai.chat.completions.create({
+                      model: "gpt-4o",
+                      messages: [
+                        { role: "system", content: 'Return a single JSON object with fields: date, merchant, amount, tax (optional), description, gl_code.' },
+                        { role: "user", content: `Extract from this receipt text (may be incomplete):\n\n${pdfText}` }
+                      ],
+                      response_format: { type: "json_object" },
+                      temperature: 0.1,
+                      max_tokens: 300
+                    }), { retries: 3, baseMs: 600 });
+                    openaiContent = fallbackResp.choices[0].message.content;
+                  }
+                }
                 
                 // Parse OpenAI response with error handling
                 let parsedData;
                 try {
-                    parsedData = JSON.parse(openaiResponse.choices[0].message.content);
+                    parsedData = JSON.parse(openaiContent);
                     
                     // Validate required fields
                     const requiredFields = ['date', 'merchant', 'amount', 'description', 'gl_code'];
