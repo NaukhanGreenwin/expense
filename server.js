@@ -14,6 +14,8 @@ const dayjs = require('dayjs');
 const { v4: uuidv4 } = require('uuid');
 const archiver = require('archiver');
 const cors = require('cors'); // Add CORS middleware
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const sessions = new Map(); // Store session data
 
 // Expenses data store - in-memory for demo purposes
@@ -24,20 +26,34 @@ function saveExpenses() {
   console.log("Expenses data updated");
 }
 
-// Add debugging - print environment variables
-console.log('Environment variables:');
-console.log('PORT:', process.env.PORT);
-console.log('OPENAI_API_KEY exists:', !!process.env.OPENAI_API_KEY);
-if (process.env.OPENAI_API_KEY) {
-  console.log('API Key starts with:', process.env.OPENAI_API_KEY.substring(0, 10) + '...');
-}
+// Avoid logging sensitive environment details
 
-// Set up multer for file uploads
+// Configure multer with per-session directories and 50MB limit
+const storage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    try {
+      // sessionId will be set by an init middleware
+      if (!req.sessionId) {
+        req.sessionId = uuidv4();
+      }
+      const sessionDir = path.join(__dirname, 'uploads', req.sessionId);
+      await fsPromises.mkdir(sessionDir, { recursive: true });
+      cb(null, sessionDir);
+    } catch (err) {
+      cb(err);
+    }
+  },
+  filename: (req, file, cb) => {
+    const name = file.originalname || `upload_${Date.now()}.pdf`;
+    cb(null, name);
+  }
+});
+
 const upload = multer({
-  dest: 'uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
+    if (file.mimetype === 'application/pdf' || (file.originalname && file.originalname.toLowerCase().endsWith('.pdf'))) {
       cb(null, true);
     } else {
       cb(new Error('Only PDF files are allowed'));
@@ -53,18 +69,29 @@ if (!fs.existsSync('uploads')) {
 // Initialize OpenAI with the API key from environment variables
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true,
 });
 
 const app = express();
-const PORT = 3005;
+const PORT = process.env.PORT || 3005;
 
-// Enable CORS for all routes
-app.use(cors());
+// Security middleware
+app.use(helmet());
+
+// Enable CORS with optional restriction via env
+const allowedOrigin = process.env.ALLOWED_ORIGIN;
+if (allowedOrigin) {
+  app.use(cors({ origin: allowedOrigin }));
+} else {
+  app.use(cors());
+}
+
+// Basic rate limiting for API
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
+app.use('/api/', apiLimiter);
 
 // Middleware
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: '5mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Routes
@@ -145,14 +172,17 @@ async function cleanUploadsDirectory(oldestAgeInMinutes = 120) {
       const filePath = path.join(uploadsDir, file);
       try {
         const stats = await fsPromises.stat(filePath);
-        
-        // Check if older than cutoff
-        if (stats.mtime.getTime() < cutoffTime) {
+        const isOld = stats.mtime.getTime() < cutoffTime;
+        if (!isOld) continue;
+        if (stats.isDirectory()) {
+          await fsPromises.rm(filePath, { recursive: true, force: true });
+          console.log(`Removed old directory: ${file}`);
+        } else {
           await fsPromises.unlink(filePath);
           console.log(`Removed old file: ${file}`);
         }
       } catch (err) {
-        console.error(`Error removing file ${file}:`, err);
+        console.error(`Error removing path ${file}:`, err);
       }
     }
     
@@ -163,8 +193,32 @@ async function cleanUploadsDirectory(oldestAgeInMinutes = 120) {
   }
 }
 
+// Initialize a new upload session
+function initUploadSession(req, res, next) {
+  if (!req.sessionId) {
+    req.sessionId = uuidv4();
+  }
+  sessions.set(req.sessionId, { files: [], createdAt: Date.now() });
+  next();
+}
+
+// Simple retry helper for transient failures
+async function withRetry(fn, { retries = 3, baseMs = 500 } = {}) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const wait = baseMs * Math.pow(2, i);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
+}
+
 // PDF Upload and Processing Route for multiple files
-app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
+app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), async (req, res) => {
     try {
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: 'No PDF files uploaded' });
@@ -179,17 +233,13 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
             return res.status(400).json({ error: 'Name and Department are required fields' });
         }
 
-        const sessionId = Date.now().toString(); // Simple timestamp-based session ID
-        sessions.set(sessionId, {
-            files: [],
-            createdAt: Date.now()
-        });
+        const sessionId = req.sessionId;
 
         const results = [];
         const errors = [];
 
-        // Process files in parallel for maximum speed (batches of 10)
-        const BATCH_SIZE = 10; // Process 10 PDFs simultaneously for faster throughput
+        // Process files in parallel with limited concurrency
+        const BATCH_SIZE = 5; // Reduce concurrency to limit API pressure
         
         for (let i = 0; i < req.files.length; i += BATCH_SIZE) {
             const batch = req.files.slice(i, i + BATCH_SIZE);
@@ -197,15 +247,18 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
             // Process batch in parallel
             const batchPromises = batch.map(async (file) => {
             try {
-                // Read PDF file
-                const pdfBuffer = fs.readFileSync(file.path);
+                // Read PDF file (async) and quick header validation
+                const pdfBuffer = await fsPromises.readFile(file.path);
+                if (pdfBuffer.slice(0, 5).toString() !== '%PDF-') {
+                  throw new Error('Invalid PDF file content');
+                }
                 const pdfData = await pdfParse(pdfBuffer);
                 
                 // Extract text content from PDF
                 const pdfText = pdfData.text;
                 
                 // Process with OpenAI API - Using GPT-4o for maximum intelligence and speed
-                const openaiResponse = await openai.chat.completions.create({
+                const openaiResponse = await withRetry(() => openai.chat.completions.create({
                     model: "gpt-4o",
                     messages: [
                         {
@@ -328,7 +381,7 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                     temperature: 0.1, // Low for concise, consistent descriptions
                     max_tokens: 500, // Reduced for short descriptions
                     top_p: 0.95 // Focus on most likely tokens for faster processing
-                });
+                }), { retries: 3, baseMs: 600 });
                 
                 // Parse OpenAI response with error handling
                 let parsedData;
@@ -388,7 +441,9 @@ app.post('/api/upload-pdf', upload.array('pdfFiles', 50), async (req, res) => {
                 }
                 
                 // Add file to session tracking
-                sessions.get(sessionId).files.push(file.path);
+                const sess = sessions.get(sessionId) || { files: [], createdAt: Date.now() };
+                sess.files.push(file.path);
+                sessions.set(sessionId, sess);
                 console.log(`PDF file saved at: ${file.path}`);
 
                 // Return the result for this file
@@ -1430,46 +1485,21 @@ app.post('/api/export-excel', async (req, res) => {
     // Add digital signature if provided
     if (signature) {
       try {
-        console.log('Signature data received on server side');
-        
         // Extract the base64 data from the signature string
         const signatureParts = signature.split(',');
-        console.log('Signature format:', signatureParts[0]);
-        
         const base64Data = signatureParts[1];
         if (base64Data) {
-          console.log('Base64 data length:', base64Data.length);
-          console.log('Base64 data starts with:', base64Data.substring(0, 30) + '...');
-          
-          // Save the image to a temporary file
-          const tempImgPath = path.join(__dirname, 'temp_signature.png');
           const imgBuffer = Buffer.from(base64Data, 'base64');
-          fs.writeFileSync(tempImgPath, imgBuffer);
-          
-          console.log('Signature saved to temporary file');
-          
           try {
-            // Create an image
-            const signatureImage = workbook.addImage({
-              filename: tempImgPath,
-              extension: 'png',
-            });
-            
-            console.log('Image created in workbook from file');
-            
-            // Add image to the worksheet at the signature position
+            // Embed image directly from buffer
+            const signatureImage = workbook.addImage({ buffer: imgBuffer, extension: 'png' });
             worksheet.addImage(signatureImage, {
               tl: { col: 0, row: signatureRow + 0.2 },
               br: { col: 2.5, row: signatureRow + 1.8 },
               editAs: 'oneCell'
             });
-            
-            // Log success message for debugging
-            console.log('Signature added to Excel file successfully');
-            
-            // DO NOT delete the temp file here - we'll delete it after the Excel is generated
           } catch (imgError) {
-            console.error('Error creating image from file:', imgError);
+            console.error('Error embedding signature image:', imgError);
           }
         } else {
           console.log('No base64 data found in signature string');
@@ -1518,17 +1548,6 @@ app.post('/api/export-excel', async (req, res) => {
     // Generate Excel file
     const buffer = await workbook.xlsx.writeBuffer();
     
-    // Clean up the temporary signature file if it exists
-    const tempImgPath = path.join(__dirname, 'temp_signature.png');
-    if (fs.existsSync(tempImgPath)) {
-      try {
-        fs.unlinkSync(tempImgPath);
-        console.log('Temporary signature file removed after Excel generation');
-      } catch (cleanupError) {
-        console.error('Error removing temporary file:', cleanupError);
-      }
-    }
-    
     // Send the file to the client
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=Expense_Report.xlsx');
@@ -1542,115 +1561,7 @@ app.post('/api/export-excel', async (req, res) => {
 });
 
 // Add our new route for merging PDFs - simplified version that merges all PDFs
-app.post('/api/merge-pdfs', async (req, res) => {
-  try {
-    // Create temporary directory if it doesn't exist
-    const tempDir = path.join(__dirname, 'temp');
-    try {
-      await fsPromises.access(tempDir);
-    } catch {
-      await fsPromises.mkdir(tempDir);
-    }
-    
-    // Path for the merged PDF
-    const mergedPdfPath = path.join(tempDir, `Greenwin_Merged_PDF_${Date.now()}.pdf`);
-    
-    // Initialize PDF merger - using v4 syntax
-    const merger = new PDFMerger();
-    
-    // Get all PDF files from the uploads directory
-    const uploadsDir = path.join(__dirname, 'uploads');
-    let files = [];
-    
-    try {
-      files = await fsPromises.readdir(uploadsDir);
-      console.log(`Found ${files.length} files in uploads directory`);
-    } catch (err) {
-      console.error('Error reading uploads directory:', err);
-      return res.status(404).json({ success: false, error: 'No PDF files found' });
-    }
-    
-    // Check if we have any files to merge
-    if (files.length === 0) {
-      return res.status(404).json({ success: false, error: 'No PDF files found' });
-    }
-    
-    // Add all valid PDF files to the merger
-    let filesAdded = 0;
-    
-    // Loop through all files
-    for (const file of files) {
-      const filePath = path.join(uploadsDir, file);
-      try {
-        // Check if file exists and is readable
-        await fsPromises.access(filePath, fs.constants.R_OK);
-        
-        // Try to read the file as a PDF
-        try {
-          const pdfBuffer = fs.readFileSync(filePath);
-          // Try to parse it as a PDF (this will throw if not a PDF)
-          await pdfParse(pdfBuffer, { max: 1 }); // Only parse the first page to verify it's a PDF
-          
-          // Add file to merger - using v4 syntax
-          merger.add(filePath);  // v4 doesn't require await here
-          filesAdded++;
-          console.log(`Added file to merger: ${file}`);
-        } catch (pdfError) {
-          console.log(`File ${file} is not a valid PDF, skipping`);
-        }
-      } catch (err) {
-        console.error(`Error processing file ${file}:`, err);
-      }
-    }
-    
-    if (filesAdded === 0) {
-      return res.status(404).json({ success: false, error: 'No valid PDF files could be processed' });
-    }
-    
-    // Save the merged PDF - using v4 syntax
-    await merger.save(mergedPdfPath);  // This requires await in v4
-    console.log(`Merged PDF saved to: ${mergedPdfPath}`);
-    
-    // Send the merged PDF as a download with proper headers
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="Greenwin_Merged_PDF.pdf"`);
-    
-    // Stream the file to the client
-    const fileStream = fs.createReadStream(mergedPdfPath);
-    fileStream.pipe(res);
-    
-    // Clean up the temp file after streaming is complete
-    fileStream.on('end', () => {
-      // Delete the temporary file after it's been sent
-      try {
-        fs.unlinkSync(mergedPdfPath);
-        console.log(`Temporary PDF file deleted: ${mergedPdfPath}`);
-      } catch (err) {
-        console.error(`Error deleting temporary PDF file: ${err.message}`);
-      }
-    });
-    
-    // Handle errors during file streaming
-    fileStream.on('error', (err) => {
-      console.error(`Error streaming PDF file: ${err.message}`);
-      // Only send error if headers haven't been sent
-      if (!res.headersSent) {
-        res.status(500).json({ success: false, error: 'Error streaming PDF file' });
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error merging PDFs:', error);
-    
-    // Only send error if headers haven't been sent
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to merge PDF invoices'
-      });
-    }
-  }
-});
+// (Removed deprecated global merge endpoint to prevent mixing sessions)
 
 // PDF Export Route
 app.get('/api/export-pdf', async (req, res) => {
@@ -1686,13 +1597,17 @@ app.get('/api/export-pdf', async (req, res) => {
             });
         });
 
-        // Cleanup: Delete individual files after merging
+        // Cleanup: Delete individual files and try removing session dir
         for (const file of filesToMerge) {
             fs.unlink(file, (err) => {
                 if (err) console.error('Error deleting file:', err);
                 else console.log('Deleted:', file);
             });
         }
+        const sessionDir = path.join(__dirname, 'uploads', sessionId);
+        fs.rm(sessionDir, { recursive: true, force: true }, (err) => {
+            if (err) console.warn('Could not remove session directory:', sessionDir, err.message);
+        });
 
         // Cleanup: Remove session after processing
         sessions.delete(sessionId);
@@ -1714,8 +1629,8 @@ app.post('/api/export-email', async (req, res) => {
     
     // Paths for the temporary files
     const timestamp = Date.now();
-    const excelPath = `/temp/Greenwin_Expense_Report_${timestamp}.xlsx`;
-    const pdfPath = `/temp/Greenwin_Expense_PDF_${timestamp}.pdf`;
+    const excelPath = `temp/Greenwin_Expense_Report_${timestamp}.xlsx`;
+    const pdfPath = `temp/Greenwin_Expense_PDF_${timestamp}.pdf`;
     
     // Make sure the temp directory exists
     if (!fs.existsSync(path.join(__dirname, 'public/temp'))) {
@@ -1949,6 +1864,15 @@ app.use((err, req, res, next) => {
     error: err.message || 'Something went wrong!'
   });
 });
+
+// Healthcheck endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Periodic cleanup of uploads directory (old files)
+setTimeout(() => cleanUploadsDirectory(120), 10 * 1000); // initial delayed run
+setInterval(() => cleanUploadsDirectory(120), 60 * 60 * 1000); // hourly
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

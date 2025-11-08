@@ -1811,26 +1811,32 @@ async function handleExcelExport() {
     }
 }
 
-// Handle PDF export
+// Handle PDF export (session-aware)
 async function handlePdfExport() {
     if (!currentSessionId) {
         showNotification('No receipts to export. Please upload PDF receipts first.', 'warning');
         return;
     }
-    
+
     try {
         loadingOverlay.classList.add('active');
         document.querySelector('.loading-overlay p').textContent = 'Merging PDF receipts...';
-        
-        const response = await fetch('/api/merge-pdfs', {
-            method: 'POST'
-        });
-        
+
+        // Use session-aware endpoint so only current upload’s PDFs are merged
+        const urlWithSession = `/api/export-pdf?sessionId=${encodeURIComponent(currentSessionId)}`;
+        const response = await fetch(urlWithSession, { method: 'GET' });
+
         if (!response.ok) {
-            throw new Error('Failed to merge PDFs');
+            // Try to extract server-provided error if JSON
+            try {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to merge PDFs');
+            } catch (_) {
+                throw new Error('Failed to merge PDFs');
+            }
         }
-        
-        // Download the file
+
+        // Download the merged file
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1840,7 +1846,10 @@ async function handlePdfExport() {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
-        
+
+        // Server cleans up the session; clear local reference
+        currentSessionId = null;
+
         loadingOverlay.classList.remove('active');
         showNotification('PDF merged successfully', 'success');
     } catch (error) {
@@ -1848,5 +1857,4 @@ async function handlePdfExport() {
         loadingOverlay.classList.remove('active');
         showNotification('Failed to merge PDFs: ' + error.message, 'error');
     }
-} 
-
+}
