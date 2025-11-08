@@ -496,17 +496,7 @@ main.container {
     gap: 0.6rem;
     color: var(--accent-color);
 }
-.stepper .step .step-number {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #e9ecef;
-    color: #555;
-    font-weight: 600;
-}
+.stepper .step .step-number { display: none; }
 .stepper .step.active .step-number {
     background: var(--primary-color);
     color: #fff;
