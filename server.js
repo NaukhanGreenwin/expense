@@ -37,7 +37,8 @@ const storage = multer.diskStorage({
     }
   },
   filename: (req, file, cb) => {
-    const name = file.originalname || `upload_${Date.now()}.pdf`;
+    const safeBase = (file.originalname || `upload_${Date.now()}.pdf`).replace(/[^A-Za-z0-9._-]/g, '_');
+    const name = `${uuidv4()}_${safeBase}`;
     cb(null, name);
   }
 });
@@ -351,7 +352,26 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                 const pdfData = await pdfParse(pdfBuffer);
                 
                 // Extract text content from PDF
-                const pdfText = pdfData.text;
+                let pdfText = pdfData.text || '';
+
+                // OCR fallback for scanned/image-only PDFs
+                if (pdfText.trim().length < 20 && process.env.OCR_SPACE_API_KEY) {
+                  try {
+                    const form = new FormData();
+                    form.append('apikey', process.env.OCR_SPACE_API_KEY);
+                    form.append('language', 'eng');
+                    form.append('isOverlayRequired', 'false');
+                    form.append('OCREngine', '2');
+                    form.append('file', new Blob([pdfBuffer], { type: 'application/pdf' }), file.originalname || 'upload.pdf');
+                    const ocrResp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
+                    const ocrJson = await ocrResp.json();
+                    if (ocrJson && Array.isArray(ocrJson.ParsedResults)) {
+                      pdfText = ocrJson.ParsedResults.map(r => r.ParsedText || '').join('\n');
+                    }
+                  } catch (ocrErr) {
+                    console.warn('OCR fallback failed:', ocrErr.message);
+                  }
+                }
                 
                 // Process with OpenAI API - Using GPT-4o for maximum intelligence and speed
                 const openaiResponse = await withRetry(() => openai.chat.completions.create({
@@ -539,7 +559,8 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                 // Upload PDF to Supabase Storage and track storage path
                 let storagePath = null;
                 if (supabase) {
-                  const key = `${sessionId}/${file.originalname}`;
+                  const safeOrig = (file.originalname || 'upload.pdf').replace(/[^A-Za-z0-9._-]/g, '_');
+                  const key = `${sessionId}/${uuidv4()}_${safeOrig}`;
                   const { error: upErr } = await supabase.storage.from('receipts').upload(key, pdfBuffer, {
                     contentType: 'application/pdf',
                     upsert: true,
