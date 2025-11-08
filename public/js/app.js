@@ -767,7 +767,7 @@ async function saveEditedExpense(event) {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(updatedExpense)
+            body: JSON.stringify({ ...updatedExpense, sessionId: currentSessionId })
         });
         
         if (!response.ok) {
@@ -1150,7 +1150,7 @@ async function submitExpense(expense) {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(expense)
+            body: JSON.stringify({ ...expense, sessionId: currentSessionId })
         });
         
         if (!response.ok) {
