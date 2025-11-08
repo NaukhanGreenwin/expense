@@ -13,6 +13,7 @@ let expenses = [];
 let filteredExpenses = [];
 let currentEditingExpense = null;
 let currentSessionId = null;
+let currentUploadStep = 1; // 1: info, 2: upload
 
 // --- Signature Functionality ---
 let signatureCanvas, signatureCtx, isDrawing = false;
@@ -106,6 +107,48 @@ function initApp() {
     if (pdfUploadForm) {
         pdfUploadForm.addEventListener('submit', handlePdfUpload);
     }
+
+    // Stepper controls
+    const infoNextBtn = document.getElementById('info-next-btn');
+    const uploadBackBtn = document.getElementById('upload-back-btn');
+    const pdfFileInput = document.getElementById('pdf-file');
+    const processBtn = document.getElementById('process-btn');
+
+    function updateStepper(step) {
+        currentUploadStep = step;
+        const s1 = document.getElementById('step-1-panel');
+        const s2 = document.getElementById('step-2-panel');
+        if (s1 && s2) {
+            s1.classList.toggle('active', step === 1);
+            s2.classList.toggle('active', step === 2);
+        }
+        const steps = document.querySelectorAll('#upload-stepper .step');
+        steps.forEach(el => {
+            const idx = parseInt(el.getAttribute('data-step'), 10);
+            el.classList.toggle('active', idx === step);
+            el.classList.toggle('completed', idx < step);
+        });
+        // Enable/disable upload controls based on step
+        if (pdfFileInput) pdfFileInput.disabled = (step !== 2);
+        if (processBtn) processBtn.disabled = (step !== 2);
+    }
+
+    if (infoNextBtn) {
+        infoNextBtn.addEventListener('click', () => {
+            const nameInput = document.getElementById('user-name');
+            const departmentInput = document.getElementById('user-department');
+            if (!nameInput.value.trim() || !departmentInput.value.trim()) {
+                showNotification('Please enter your Name and Department to continue.', 'warning');
+                return;
+            }
+            updateStepper(2);
+        });
+    }
+    if (uploadBackBtn) {
+        uploadBackBtn.addEventListener('click', () => updateStepper(1));
+    }
+    // Initialize to step 1 by default
+    updateStepper(1);
     
     if (expenseSearch) {
         expenseSearch.addEventListener('input', applyFilters);
@@ -151,8 +194,6 @@ function initApp() {
     createEditModal();
 
     // Add PDF file count validation
-    const pdfFileInput = document.getElementById('pdf-file');
-    
     if (pdfFileInput) {
         pdfFileInput.addEventListener('change', function() {
             const maxFiles = 50;

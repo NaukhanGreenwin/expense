@@ -37,44 +37,74 @@
             
             <div class="pdf-upload-container">
                 <h2><i class="fas fa-file-invoice"></i> Upload Receipts</h2>
-                <p>Upload your PDF receipts and our AI will automatically extract and add expenses to your list.</p>
+                <p>Follow the steps to submit your receipts and generate your report.</p>
+
+                <div class="stepper" id="upload-stepper">
+                    <div class="step active" data-step="1">
+                        <span class="step-number">1</span>
+                        <span class="step-label">Your Info</span>
+                    </div>
+                    <div class="step" data-step="2">
+                        <span class="step-number">2</span>
+                        <span class="step-label">Upload Receipts</span>
+                    </div>
+                    <div class="step" data-step="3">
+                        <span class="step-number">3</span>
+                        <span class="step-label">Review & Export</span>
+                    </div>
+                </div>
                 
                 <form id="pdf-upload-form">
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label for="user-name">Name <span class="required">*</span></label>
-                            <input type="text" id="user-name" name="userName" placeholder="Enter your name" required>
+                    <!-- STEP 1: Your Info -->
+                    <div id="step-1-panel" class="step-panel active">
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label for="user-name">Name <span class="required">*</span></label>
+                                <input type="text" id="user-name" name="userName" placeholder="Enter your name" required>
+                            </div>
+                            <div class="form-group half">
+                                <label for="user-department">Department <span class="required">*</span></label>
+                                <input type="text" id="user-department" name="userDepartment" placeholder="Enter your department" required>
+                            </div>
                         </div>
-                        <div class="form-group half">
-                            <label for="user-department">Department <span class="required">*</span></label>
-                            <input type="text" id="user-department" name="userDepartment" placeholder="Enter your department" required>
+                        <div class="form-actions">
+                            <button type="button" id="info-next-btn" class="btn-primary">
+                                Next: Upload Receipts <i class="fas fa-arrow-right" style="margin-left:8px"></i>
+                            </button>
                         </div>
                     </div>
-                    
-                    <div class="upload-component">
-                        <label class="upload-label">Upload PDFs (Maximum 50 files)</label>
-                        <div class="upload-container">
-                            <label for="pdf-file" class="upload-area">
-                                <div class="upload-content">
-                                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
-                                    <div class="upload-text">
-                                        <h3 class="upload-title">Drop files here or click to browse</h3>
-                                        <p class="upload-hint">PDF files only • 50 MB max per file</p>
+
+                    <!-- STEP 2: Upload -->
+                    <div id="step-2-panel" class="step-panel">
+                        <div class="upload-component">
+                            <label class="upload-label">Upload PDFs (Maximum 50 files)</label>
+                            <div class="upload-container">
+                                <label for="pdf-file" class="upload-area">
+                                    <div class="upload-content">
+                                        <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                                        <div class="upload-text">
+                                            <h3 class="upload-title">Drop files here or click to browse</h3>
+                                            <p class="upload-hint">PDF files only • 50 MB max per file</p>
+                                        </div>
                                     </div>
-                                </div>
-                            </label>
-                            <input type="file" id="pdf-file" name="pdfFiles" accept="application/pdf" multiple class="file-input">
+                                </label>
+                                <input type="file" id="pdf-file" name="pdfFiles" accept="application/pdf" multiple class="file-input" disabled>
+                            </div>
+                            <div class="selected-files" style="display: none;">
+                                <i class="fas fa-file-pdf files-icon"></i>
+                                <span class="files-text">No files selected</span>
+                            </div>
                         </div>
-                        <div class="selected-files" style="display: none;">
-                            <i class="fas fa-file-pdf files-icon"></i>
-                            <span class="files-text">No files selected</span>
+                        <div class="form-actions">
+                            <button type="button" id="upload-back-btn" class="btn-secondary">
+                                <i class="fas fa-arrow-left" style="margin-right:8px"></i> Back
+                            </button>
+                            <button type="submit" id="process-btn" class="process-button" disabled>
+                                <i class="fas fa-cloud-upload-alt process-icon"></i>
+                                Process
+                            </button>
                         </div>
                     </div>
-                    
-                    <button type="submit" class="process-button">
-                        <i class="fas fa-cloud-upload-alt process-icon"></i>
-                        Process
-                    </button>
                 </form>
                 
                 <!-- Digital Signature Section - Moved here -->

@@ -483,6 +483,45 @@ main.container {
     width: 100%;
 }
 
+/* Stepper */
+.stepper {
+    display: flex;
+    gap: 1.25rem;
+    margin: 0.75rem 0 1.25rem;
+    align-items: center;
+}
+.stepper .step {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--accent-color);
+}
+.stepper .step .step-number {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #e9ecef;
+    color: #555;
+    font-weight: 600;
+}
+.stepper .step.active .step-number {
+    background: var(--primary-color);
+    color: #fff;
+}
+.stepper .step.completed .step-number {
+    background: var(--success-color);
+    color: #fff;
+}
+.stepper .step .step-label {
+    font-weight: 500;
+}
+
+.step-panel { display: none; }
+.step-panel.active { display: block; }
+
 /* Expenses List Section */
 .expenses-list-container {
     background-color: white;
