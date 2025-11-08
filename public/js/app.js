@@ -1159,9 +1159,24 @@ async function submitExpense(expense) {
         
         // Get the response data with the new expense ID
         const savedExpense = await response.json();
-        
+
+        // Normalize server response to frontend shape
+        const normalized = {
+            id: savedExpense.id,
+            title: savedExpense.title || savedExpense.merchant || expense.title || '',
+            amount: typeof savedExpense.amount !== 'undefined' ? Number(savedExpense.amount) : Number(expense.amount || 0),
+            tax: typeof savedExpense.tax !== 'undefined' ? Number(savedExpense.tax) : Number(expense.tax || 0),
+            date: savedExpense.date || expense.date,
+            description: savedExpense.description || expense.description || '',
+            glCode: savedExpense.gl_code || savedExpense.glCode || expense.glCode || '6408-000',
+            name: savedExpense.name || expense.name || '',
+            department: savedExpense.department || expense.department || '',
+            location: savedExpense.location || expense.location || '',
+            propertyCode: savedExpense.property_code || savedExpense.propertyCode || expense.propertyCode || ''
+        };
+
         // Add to local state
-        expenses.push(savedExpense);
+        expenses.push(normalized);
         
         // Update filtered expenses
         applyFilters();
@@ -1199,10 +1214,12 @@ function showUploadStatus(message, type) {
 
 // Apply search filter only (removed category filter)
 function applyFilters() {
-    const searchTerm = expenseSearch.value.toLowerCase();
+    const searchTerm = (expenseSearch && expenseSearch.value ? expenseSearch.value : '').toLowerCase();
     
     filteredExpenses = expenses.filter(expense => {
-        const matchesSearch = expense.title.toLowerCase().includes(searchTerm);
+        const title = (expense.title || expense.merchant || '').toLowerCase();
+        const desc = (expense.description || '').toLowerCase();
+        const matchesSearch = !searchTerm || title.includes(searchTerm) || desc.includes(searchTerm);
         return matchesSearch;
     });
     

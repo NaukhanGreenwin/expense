@@ -4,6 +4,7 @@ package-lock.json
 
 # Environment variables
 .env
+local.env
 
 # Temporary files
 uploads/*
