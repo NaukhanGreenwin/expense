@@ -17,15 +17,7 @@ const cors = require('cors'); // Add CORS middleware
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { supabase } = require('./supabaseClient');
-const sessions = new Map(); // Store session data
-
-// Expenses data store - in-memory for demo purposes
-let expenses = [];
-
-// Function to save expenses (for demo, just logs a message)
-function saveExpenses() {
-  console.log("Expenses data updated");
-}
+// In-memory store no longer used; persisting to Supabase DB
 
 // Avoid logging sensitive environment details
 
@@ -123,62 +115,128 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Routes
-app.get('/api/expenses', (req, res) => {
-  // This would normally fetch from a database
-  res.json(expenses);
+// Fetch recent expenses (optional: filter by sessionId)
+app.get('/api/expenses', async (req, res) => {
+  try {
+    if (!supabase) return res.json([]);
+    const q = supabase
+      .from('expenses')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (e) {
+    console.error('Error fetching expenses:', e);
+    res.status(500).json([]);
+  }
 });
 
-app.post('/api/expenses', (req, res) => {
-  // This would normally save to a database
-  console.log('New expense:', req.body);
-  // Create a new expense with ID and add it to our array
-  const newExpense = { 
-    id: Date.now(), 
-    ...req.body 
-  };
-  expenses.push(newExpense);
-  saveExpenses();
-  // Return success response with ID
-  res.status(201).json(newExpense);
+// Create an expense (and optional splits)
+app.post('/api/expenses', async (req, res) => {
+  try {
+    if (!supabase) return res.status(500).json({ error: 'Database not configured' });
+    const body = req.body || {};
+    const expenseRow = {
+      session_id: body.sessionId || null,
+      date: body.date || null,
+      merchant: body.title || body.merchant || '',
+      amount: body.amount != null ? Number(body.amount) : null,
+      tax: body.tax != null ? Number(body.tax) : null,
+      gl_code: body.glCode || body.gl_code || null,
+      description: body.description || '',
+      name: body.name || '',
+      department: body.department || '',
+      location: body.location || '',
+      property_code: body.propertyCode || ''
+    };
+    const { data: inserted, error } = await supabase
+      .from('expenses')
+      .insert(expenseRow)
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    // Insert splits if provided
+    if (Array.isArray(body.splits) && body.splits.length > 0) {
+      const splitsRows = body.splits.map(s => ({
+        expense_id: inserted.id,
+        gl_code: s.glCode || s.gl_code,
+        amount: Number(s.amount),
+        percentage: s.percentage != null ? Number(s.percentage) : null
+      }));
+      const { error: splitErr } = await supabase.from('expense_splits').insert(splitsRows);
+      if (splitErr) console.error('Error inserting splits:', splitErr.message);
+    }
+
+    res.status(201).json(inserted);
+  } catch (e) {
+    console.error('Error creating expense:', e);
+    res.status(500).json({ error: 'Failed to create expense' });
+  }
 });
 
 // Fix the PUT route handler for updating expenses
-app.put('/api/expenses/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const updatedExpense = req.body;
-  
-  // Handle mileage calculation if G/L code is 6026-000
-  if (updatedExpense.glCode === '6026-000') {
-    // Use provided kilometers if available
-    const kilometers = parseFloat(updatedExpense.kilometers) || parseFloat(updatedExpense.amount) || 0;
-    updatedExpense.kilometers = kilometers;
-    updatedExpense.amount = (kilometers * 0.72).toFixed(2);
-    updatedExpense.tax = 0; // No tax for mileage
-    
-    // Store mileage-specific fields
-    if (updatedExpense.fromLocation && updatedExpense.toLocation) {
-      // These fields are already in the updatedExpense object from the client
-      console.log(`Mileage from ${updatedExpense.fromLocation} to ${updatedExpense.toLocation}`);
+app.put('/api/expenses/:id', async (req, res) => {
+  try {
+    if (!supabase) return res.status(500).json({ error: 'Database not configured' });
+    const id = parseInt(req.params.id);
+    const body = req.body || {};
+
+    // Mileage handling
+    if (body.glCode === '6026-000') {
+      const kilometers = parseFloat(body.kilometers) || parseFloat(body.amount) || 0;
+      body.kilometers = kilometers;
+      body.amount = Number((kilometers * 0.72).toFixed(2));
+      body.tax = 0;
+      if (body.fromLocation && body.toLocation) {
+        console.log(`Mileage from ${body.fromLocation} to ${body.toLocation}`);
+      }
     }
+
+    const updateRow = {
+      session_id: body.sessionId || null,
+      date: body.date || null,
+      merchant: body.title || body.merchant || '',
+      amount: body.amount != null ? Number(body.amount) : null,
+      tax: body.tax != null ? Number(body.tax) : null,
+      gl_code: body.glCode || body.gl_code || null,
+      description: body.description || '',
+      name: body.name || '',
+      department: body.department || '',
+      location: body.location || '',
+      property_code: body.propertyCode || '',
+      updated_at: new Date()
+    };
+
+    const { data: updated, error } = await supabase
+      .from('expenses')
+      .update(updateRow)
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    // Replace splits
+    const { error: delErr } = await supabase.from('expense_splits').delete().eq('expense_id', id);
+    if (delErr) console.error('Error deleting splits:', delErr.message);
+    if (Array.isArray(body.splits) && body.splits.length > 0) {
+      const rows = body.splits.map(s => ({
+        expense_id: id,
+        gl_code: s.glCode || s.gl_code,
+        amount: Number(s.amount),
+        percentage: s.percentage != null ? Number(s.percentage) : null
+      }));
+      const { error: insErr } = await supabase.from('expense_splits').insert(rows);
+      if (insErr) console.error('Error inserting splits:', insErr.message);
+    }
+
+    res.json(updated);
+  } catch (e) {
+    console.error('Error updating expense:', e);
+    res.status(500).json({ error: 'Failed to update expense' });
   }
-  
-  console.log('Updating expense:', id, updatedExpense);
-  
-  // Update the expense in expenses array
-  const index = expenses.findIndex(e => e.id === id);
-  if (index !== -1) {
-    expenses[index] = { ...expenses[index], ...updatedExpense };
-    saveExpenses();
-    return res.json(expenses[index]);
-  } 
-  
-  // If the expense doesn't exist in our array yet, add it
-  // This handles the case where expenses were created before our array was initialized
-  const newExpense = { id, ...updatedExpense };
-  expenses.push(newExpense);
-  saveExpenses();
-  console.log(`Added expense ${id} to expenses array since it didn't exist`);
-  return res.json(newExpense);
 });
 
 // Add helper function to clean up uploads directory
@@ -222,11 +280,21 @@ async function cleanUploadsDirectory(oldestAgeInMinutes = 120) {
 }
 
 // Initialize a new upload session
-function initUploadSession(req, res, next) {
-  if (!req.sessionId) {
-    req.sessionId = uuidv4();
+async function initUploadSession(req, res, next) {
+  try {
+    if (!req.sessionId) {
+      req.sessionId = uuidv4();
+    }
+    if (supabase) {
+      // Create session row if not exists
+      const { error } = await supabase.from('sessions').insert({ id: req.sessionId, status: 'active' });
+      if (error && !/duplicate key/i.test(error.message)) {
+        console.warn('Unable to create session in DB:', error.message);
+      }
+    }
+  } catch (e) {
+    console.warn('initUploadSession warning:', e.message);
   }
-  sessions.set(req.sessionId, { files: [], createdAt: Date.now() });
   next();
 }
 
@@ -483,10 +551,16 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                   }
                 }
 
-                // Add file to session tracking (prefer storage path, fallback to local path)
-                const sess = sessions.get(sessionId) || { files: [], createdAt: Date.now() };
-                sess.files.push(storagePath || file.path);
-                sessions.set(sessionId, sess);
+                // Persist upload record (prefer storage path)
+                if (supabase && (storagePath || file.path)) {
+                  const { error: upRecErr } = await supabase.from('uploads').insert({
+                    session_id: sessionId,
+                    storage_path: storagePath || file.path,
+                    original_name: file.originalname || null,
+                    size: file.size || null
+                  });
+                  if (upRecErr) console.error('Error writing upload record:', upRecErr.message);
+                }
                 console.log(`PDF file processed: ${storagePath || file.path}`);
 
                 // Remove local file if uploaded to storage
@@ -1615,12 +1689,20 @@ app.post('/api/export-excel', async (req, res) => {
 app.get('/api/export-pdf', async (req, res) => {
     try {
         const sessionId = req.query.sessionId;
-        if (!sessionId || !sessions.has(sessionId)) {
+        if (!sessionId) {
             return res.status(400).json({ error: 'Invalid session' });
         }
 
-        const session = sessions.get(sessionId);
-        const filesToMerge = session.files;
+        // Fetch upload records for this session
+        let filesToMerge = [];
+        if (supabase) {
+            const { data: rows, error } = await supabase
+                .from('uploads')
+                .select('storage_path')
+                .eq('session_id', sessionId);
+            if (error) throw error;
+            filesToMerge = (rows || []).map(r => r.storage_path);
+        }
 
         if (filesToMerge.length === 0) {
             return res.status(400).json({ error: 'No PDFs to merge' });
@@ -1660,18 +1742,21 @@ app.get('/api/export-pdf', async (req, res) => {
             for (const f of tempFiles) { try { await fsPromises.unlink(f); } catch (_) {} }
         });
 
-        // Cleanup: remove files from storage for this session
+        // Cleanup: remove files and rows for this session
         if (supabase) {
             const storagePaths = filesToMerge.filter(e => typeof e === 'string' && !e.startsWith('/') && !e.startsWith('uploads'));
             if (storagePaths.length > 0) {
                 const { error: remErr } = await supabase.storage.from('receipts').remove(storagePaths);
                 if (remErr) console.error('Supabase remove error:', remErr);
             }
+            const { error: delRowsErr } = await supabase.from('uploads').delete().eq('session_id', sessionId);
+            if (delRowsErr) console.error('Error deleting upload rows:', delRowsErr.message);
+            const { error: updSessErr } = await supabase.from('sessions').update({ status: 'completed' }).eq('id', sessionId);
+            if (updSessErr) console.error('Error updating session status:', updSessErr.message);
         }
 
         // Cleanup: Remove session after processing
-        sessions.delete(sessionId);
-        console.log('Cleaned up session:', sessionId);
+        console.log('Completed session:', sessionId);
     } catch (error) {
         console.error('Error merging PDFs:', error);
         res.status(500).json({ error: 'Error merging PDFs' });
