@@ -9,6 +9,10 @@ services:
         value: 3005
       - key: OPENAI_API_KEY
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: NODE_VERSION
         value: 18
       # Optionally restrict CORS to your domain, e.g. https://yourapp.com

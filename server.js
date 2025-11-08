@@ -16,6 +16,7 @@ const archiver = require('archiver');
 const cors = require('cors'); // Add CORS middleware
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { supabase } = require('./supabaseClient');
 const sessions = new Map(); // Store session data
 
 // Expenses data store - in-memory for demo purposes
@@ -65,6 +66,29 @@ const upload = multer({
 if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
 }
+
+// Ensure temp directory exists for downloads/merges
+const TEMP_DIR = path.join(__dirname, 'temp');
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
+
+// Attempt to ensure Supabase storage bucket exists (best-effort)
+async function ensureReceiptsBucket() {
+  if (!supabase) return;
+  try {
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const exists = (buckets || []).some(b => b.name === 'receipts');
+    if (!exists) {
+      await supabase.storage.createBucket('receipts', { public: false, fileSizeLimit: 50 * 1024 * 1024 });
+      console.log('Created Supabase bucket: receipts');
+    }
+  } catch (e) {
+    // Ignore if lacking permissions or already exists
+    console.warn('Bucket ensure warning:', e.message);
+  }
+}
+ensureReceiptsBucket();
 
 // Initialize OpenAI with the API key from environment variables
 const openai = new OpenAI({
@@ -444,11 +468,31 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                     parsedData.glCode = parsedData.gl_code;
                 }
                 
-                // Add file to session tracking
+                // Upload PDF to Supabase Storage and track storage path
+                let storagePath = null;
+                if (supabase) {
+                  const key = `${sessionId}/${file.originalname}`;
+                  const { error: upErr } = await supabase.storage.from('receipts').upload(key, pdfBuffer, {
+                    contentType: 'application/pdf',
+                    upsert: true,
+                  });
+                  if (upErr) {
+                    console.error('Supabase upload error:', upErr);
+                  } else {
+                    storagePath = key;
+                  }
+                }
+
+                // Add file to session tracking (prefer storage path, fallback to local path)
                 const sess = sessions.get(sessionId) || { files: [], createdAt: Date.now() };
-                sess.files.push(file.path);
+                sess.files.push(storagePath || file.path);
                 sessions.set(sessionId, sess);
-                console.log(`PDF file saved at: ${file.path}`);
+                console.log(`PDF file processed: ${storagePath || file.path}`);
+
+                // Remove local file if uploaded to storage
+                if (storagePath) {
+                  try { await fsPromises.unlink(file.path); } catch (_) {}
+                }
 
                 // Return the result for this file
                 return {
@@ -1583,35 +1627,47 @@ app.get('/api/export-pdf', async (req, res) => {
         }
 
         const merger = new PDFMerger();
-        for (const file of filesToMerge) {
-            await merger.add(file);
+        const tempFiles = [];
+        for (const entry of filesToMerge) {
+            const isStorage = typeof entry === 'string' && !entry.startsWith('/') && !entry.startsWith('uploads');
+            if (isStorage && supabase) {
+                const { data, error } = await supabase.storage.from('receipts').download(entry);
+                if (error) {
+                    console.error('Supabase download error:', error);
+                    continue;
+                }
+                const arrBuf = await data.arrayBuffer();
+                const buf = Buffer.from(arrBuf);
+                const tempPath = path.join(TEMP_DIR, `${sessionId}_${path.basename(entry)}`);
+                await fsPromises.writeFile(tempPath, buf);
+                tempFiles.push(tempPath);
+                await merger.add(tempPath);
+            } else {
+                // Local fallback
+                await merger.add(entry);
+            }
         }
 
-        const mergedPdfPath = path.join('uploads', `merged_${Date.now()}.pdf`);
+        const mergedPdfPath = path.join(TEMP_DIR, `merged_${Date.now()}.pdf`);
         await merger.save(mergedPdfPath);
 
-        res.download(mergedPdfPath, 'expense_report.pdf', (err) => {
+        res.download(mergedPdfPath, 'expense_report.pdf', async (err) => {
             if (err) {
                 console.error('Error sending file:', err);
             }
-            // Cleanup: Delete the merged file after sending
-            fs.unlink(mergedPdfPath, (err) => {
-                if (err) console.error('Error deleting merged file:', err);
-                else console.log('Deleted merged file:', mergedPdfPath);
-            });
+            // Cleanup temp merged and downloaded files
+            try { await fsPromises.unlink(mergedPdfPath); } catch (_) {}
+            for (const f of tempFiles) { try { await fsPromises.unlink(f); } catch (_) {} }
         });
 
-        // Cleanup: Delete individual files and try removing session dir
-        for (const file of filesToMerge) {
-            fs.unlink(file, (err) => {
-                if (err) console.error('Error deleting file:', err);
-                else console.log('Deleted:', file);
-            });
+        // Cleanup: remove files from storage for this session
+        if (supabase) {
+            const storagePaths = filesToMerge.filter(e => typeof e === 'string' && !e.startsWith('/') && !e.startsWith('uploads'));
+            if (storagePaths.length > 0) {
+                const { error: remErr } = await supabase.storage.from('receipts').remove(storagePaths);
+                if (remErr) console.error('Supabase remove error:', remErr);
+            }
         }
-        const sessionDir = path.join(__dirname, 'uploads', sessionId);
-        fs.rm(sessionDir, { recursive: true, force: true }, (err) => {
-            if (err) console.warn('Could not remove session directory:', sessionDir, err.message);
-        });
 
         // Cleanup: Remove session after processing
         sessions.delete(sessionId);
