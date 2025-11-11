@@ -982,70 +982,72 @@ async function handlePdfUpload(event) {
             throw new Error(result.error || 'Failed to process PDF');
         }
         
-        // Store the session ID
+        const successfulResults = Array.isArray(result.results) ? result.results : [];
+        const failedResults = Array.isArray(result.errors) ? result.errors : [];
+
+        // Surface any failures separately so the user knows which receipts need manual attention
+        if (failedResults.length > 0) {
+            const summarized = failedResults
+                .map(err => `${err.filename || 'Unknown file'} – ${err.error || err.message || 'Unknown error'}`)
+                .join(' | ');
+            showNotification(`Some receipts could not be processed: ${summarized}`, 'warning', 8000);
+        }
+
+        // Store the session ID for downstream exports
         currentSessionId = result.sessionId;
         console.log('Session ID set:', currentSessionId);
         
-        // Check if we have results
-        if (result.results && result.results.length > 0) {
-            // Process each result and add to expenses
-            let expensesAdded = 0;
-            
-            for (const item of result.results) {
-                try {
-                    // Ensure we have data to process
-                    if (item && (item.data || item)) {
-                        // Use a small delay between submissions to allow UI to update
-                        setTimeout(() => {
-                            // Office humor messages for progress
-                            const progressMessages = [
-                                "🧾 Expense #[COUNT] - Preparing for accounting's approval...",
-                                "💸 Expense #[COUNT] - Converting receipts to money in your pocket...",
-                                "🔍 Expense #[COUNT] - Finding the best tax category for this one...",
-                                "📋 Expense #[COUNT] - Adding legitimate business purpose..."
-                            ];
-                            
-                            // Pick a random message and replace [COUNT] with the actual count
-                            let progressMessage = progressMessages[Math.floor(Math.random() * progressMessages.length)];
-                            progressMessage = progressMessage.replace('[COUNT]', expensesAdded + 1);
-                            
-                            document.querySelector('.loading-overlay p').textContent = progressMessage;
-                            populateExpenseForm(item);
-                            expensesAdded++;
-                            
-                            // Update UI when all done
-                            if (expensesAdded === result.results.length) {
-                                // Clear the message rotation interval
-                                clearInterval(messageInterval);
-                                
-                                // Hide loading overlay
-                                loadingOverlay.classList.remove('active');
-                                
-                                // Show success message
-                                const message = result.results.length === 1 
-                                    ? '1 expense was added successfully' 
-                                    : `${result.results.length} expenses were added successfully`;
-                                showNotification(message, 'success');
-                                
-                                // Reset the file input
-                                fileInput.value = '';
-                            }
-                        }, expensesAdded * 300); // 300ms delay between each submission
-                    } else {
-                        console.warn('Skipping result item with missing data:', item);
-                    }
-                } catch (err) {
-                    console.error('Error processing PDF result item:', err);
-                }
-            }
-        } else {
-            // Clear the message rotation interval
+        if (successfulResults.length === 0) {
             clearInterval(messageInterval);
-            
-            // Hide loading overlay
             loadingOverlay.classList.remove('active');
-            showNotification('No data extracted from PDF', 'error');
+            fileInput.value = '';
+            if (failedResults.length > 0) {
+                showNotification('All receipts failed to parse. Please review the warnings and try again.', 'error', 8000);
+            } else {
+                showNotification('No data extracted from PDF', 'error');
+            }
+            return;
         }
+
+        // Process each successful result and add to expenses
+        let expensesAdded = 0;
+        successfulResults.forEach((item, index) => {
+            try {
+                if (!item || !(item.data || item)) {
+                    console.warn('Skipping result item with missing data:', item);
+                    return;
+                }
+                
+                setTimeout(() => {
+                    const progressMessages = [
+                        "🧾 Expense #[COUNT] - Preparing for accounting's approval...",
+                        "💸 Expense #[COUNT] - Converting receipts to money in your pocket...",
+                        "🔍 Expense #[COUNT] - Finding the best tax category for this one...",
+                        "📋 Expense #[COUNT] - Adding legitimate business purpose..."
+                    ];
+                    
+                    let progressMessage = progressMessages[Math.floor(Math.random() * progressMessages.length)];
+                    progressMessage = progressMessage.replace('[COUNT]', index + 1);
+                    
+                    document.querySelector('.loading-overlay p').textContent = progressMessage;
+                    populateExpenseForm(item);
+                    expensesAdded++;
+                    
+                    if (expensesAdded === successfulResults.length) {
+                        clearInterval(messageInterval);
+                        loadingOverlay.classList.remove('active');
+                        
+                        const message = successfulResults.length === 1 
+                            ? '1 expense was added successfully' 
+                            : `${successfulResults.length} expenses were added successfully`;
+                        showNotification(message, 'success');
+                        fileInput.value = '';
+                    }
+                }, index * 300);
+            } catch (err) {
+                console.error('Error processing PDF result item:', err);
+            }
+        });
     } catch (error) {
         // Clear the message rotation interval when error occurs
         clearInterval(messageInterval);
@@ -1452,7 +1454,7 @@ function determineGLCode(merchant, description) {
     
     // Mileage/ETR
     if (text.includes('parking') || text.includes('toll') || text.includes('mileage') || 
-        text.includes('transit')) {
+        text.includes('transit') || text.includes('etr') || text.includes('407')) {
         return '6026-000';
     }
     

@@ -16,9 +16,9 @@ const archiver = require('archiver');
 const cors = require('cors'); // Add CORS middleware
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { supabase } = require('./supabaseClient');
+// No external DB: using in-memory + filesystem storage only
 const { fromPath: pdf2imgFromPath } = require('pdf2pic');
-// In-memory store no longer used; persisting to Supabase DB
+// All data is in-memory/filesystem; no SQL or external DB
 
 // Avoid logging sensitive environment details
 
@@ -67,22 +67,11 @@ if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
-// Attempt to ensure Supabase storage bucket exists (best-effort)
-async function ensureReceiptsBucket() {
-  if (!supabase) return;
-  try {
-    const { data: buckets } = await supabase.storage.listBuckets();
-    const exists = (buckets || []).some(b => b.name === 'receipts');
-    if (!exists) {
-      await supabase.storage.createBucket('receipts', { public: false, fileSizeLimit: 50 * 1024 * 1024 });
-      console.log('Created Supabase bucket: receipts');
-    }
-  } catch (e) {
-    // Ignore if lacking permissions or already exists
-    console.warn('Bucket ensure warning:', e.message);
-  }
-}
-ensureReceiptsBucket();
+// In-memory stores (ephemeral, non-SQL)
+const memory = {
+  expenses: [], // { id, ...fields, splits?: [] }
+  uploadsBySession: new Map(), // sessionId -> [{ path, original_name, size }]
+};
 
 // Initialize OpenAI with the API key from environment variables
 const openai = new OpenAI({
@@ -120,15 +109,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Fetch recent expenses (optional: filter by sessionId)
 app.get('/api/expenses', async (req, res) => {
   try {
-    if (!supabase) return res.json([]);
-    const q = supabase
-      .from('expenses')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100);
-    const { data, error } = await q;
-    if (error) throw error;
-    res.json(data || []);
+    // Return latest 100 in-memory expenses
+    const data = memory.expenses.slice(-100).reverse();
+    res.json(data);
   } catch (e) {
     console.error('Error fetching expenses:', e);
     res.status(500).json([]);
@@ -139,51 +122,47 @@ app.get('/api/expenses', async (req, res) => {
 app.post('/api/expenses', async (req, res) => {
   try {
     const body = req.body || {};
-    if (!supabase) {
-      // Fallback: echo back with generated id for local/dev without DB
-      const fallback = { id: Date.now(), ...body };
-      return res.status(201).json(fallback);
+    let normalizedGlCode = null;
+    try {
+      normalizedGlCode = normalizeGlCode(body.glCode || body.gl_code);
+    } catch (glErr) {
+      return res.status(400).json({ error: glErr.message });
     }
-
     const expenseRow = {
       session_id: body.sessionId || null,
       date: body.date || null,
       merchant: body.title || body.merchant || '',
       amount: body.amount != null ? Number(body.amount) : null,
       tax: body.tax != null ? Number(body.tax) : null,
-      gl_code: body.glCode || body.gl_code || null,
+      gl_code: normalizedGlCode,
       description: body.description || '',
       name: body.name || '',
       department: body.department || '',
       location: body.location || '',
       property_code: body.propertyCode || ''
     };
-    let inserted;
-    try {
-      const resp = await supabase
-        .from('expenses')
-        .insert(expenseRow)
-        .select('*')
-        .single();
-      if (resp.error) throw resp.error;
-      inserted = resp.data;
-    } catch (dbErr) {
-      console.warn('Supabase insert failed, using local fallback:', dbErr.message);
-      const fallback = { id: Date.now(), ...expenseRow };
-      return res.status(201).json(fallback);
-    }
-
-    // Insert splits if provided
+    const inserted = { id: Date.now(), ...expenseRow };
+    // Attach splits if provided
     if (Array.isArray(body.splits) && body.splits.length > 0) {
-      const splitsRows = body.splits.map(s => ({
-        expense_id: inserted.id,
-        gl_code: s.glCode || s.gl_code,
-        amount: Number(s.amount),
-        percentage: s.percentage != null ? Number(s.percentage) : null
-      }));
-      const { error: splitErr } = await supabase.from('expense_splits').insert(splitsRows);
-      if (splitErr) console.error('Error inserting splits:', splitErr.message);
+      inserted.splits = [];
+      try {
+        body.splits.forEach(s => {
+          const normalizedSplitGlCode = normalizeGlCode(s.glCode || s.gl_code);
+          if (!normalizedSplitGlCode) {
+            throw new Error('Split G/L code is required');
+          }
+          inserted.splits.push({
+            gl_code: normalizedSplitGlCode,
+            amount: Number(s.amount),
+            percentage: s.percentage != null ? Number(s.percentage) : null
+          });
+        });
+      } catch (splitErr) {
+        return res.status(400).json({ error: splitErr.message });
+      }
     }
+    memory.expenses.push(inserted);
+    return res.status(201).json(inserted);
 
     res.status(201).json(inserted);
   } catch (e) {
@@ -197,9 +176,16 @@ app.put('/api/expenses/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const body = req.body || {};
+    const glCodeInput = body.glCode || body.gl_code;
+    let normalizedGlCode = null;
+    try {
+      normalizedGlCode = normalizeGlCode(glCodeInput);
+    } catch (glErr) {
+      return res.status(400).json({ error: glErr.message });
+    }
 
     // Mileage handling
-    if (body.glCode === '6026-000') {
+    if (normalizedGlCode === '6026-000') {
       const kilometers = parseFloat(body.kilometers) || parseFloat(body.amount) || 0;
       body.kilometers = kilometers;
       body.amount = Number((kilometers * 0.72).toFixed(2));
@@ -215,7 +201,7 @@ app.put('/api/expenses/:id', async (req, res) => {
       merchant: body.title || body.merchant || '',
       amount: body.amount != null ? Number(body.amount) : null,
       tax: body.tax != null ? Number(body.tax) : null,
-      gl_code: body.glCode || body.gl_code || null,
+      gl_code: normalizedGlCode,
       description: body.description || '',
       name: body.name || '',
       department: body.department || '',
@@ -224,40 +210,32 @@ app.put('/api/expenses/:id', async (req, res) => {
       updated_at: new Date()
     };
 
-    if (!supabase) {
-      // Fallback: echo back update for local/dev without DB
-      return res.json({ id, ...body });
+    // Update in-memory
+    const idx = memory.expenses.findIndex(e => e.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Expense not found' });
     }
-
-    let updated;
-    try {
-      const resp = await supabase
-        .from('expenses')
-        .update(updateRow)
-        .eq('id', id)
-        .select('*')
-        .single();
-      if (resp.error) throw resp.error;
-      updated = resp.data;
-    } catch (dbErr) {
-      console.warn('Supabase update failed, using local fallback:', dbErr.message);
-      return res.json({ id, ...updateRow });
+    const updated = { ...memory.expenses[idx], ...updateRow };
+    if (Array.isArray(body.splits)) {
+      // Replace splits
+      updated.splits = [];
+      try {
+        body.splits.forEach(s => {
+          const normalizedSplitGlCode = normalizeGlCode(s.glCode || s.gl_code);
+          if (!normalizedSplitGlCode) {
+            throw new Error('Split G/L code is required');
+          }
+          updated.splits.push({
+            gl_code: normalizedSplitGlCode,
+            amount: Number(s.amount),
+            percentage: s.percentage != null ? Number(s.percentage) : null
+          });
+        });
+      } catch (splitErr) {
+        return res.status(400).json({ error: splitErr.message });
+      }
     }
-
-    // Replace splits
-    const { error: delErr } = await supabase.from('expense_splits').delete().eq('expense_id', id);
-    if (delErr) console.error('Error deleting splits:', delErr.message);
-    if (Array.isArray(body.splits) && body.splits.length > 0) {
-      const rows = body.splits.map(s => ({
-        expense_id: id,
-        gl_code: s.glCode || s.gl_code,
-        amount: Number(s.amount),
-        percentage: s.percentage != null ? Number(s.percentage) : null
-      }));
-      const { error: insErr } = await supabase.from('expense_splits').insert(rows);
-      if (insErr) console.error('Error inserting splits:', insErr.message);
-    }
-
+    memory.expenses[idx] = updated;
     res.json(updated);
   } catch (e) {
     console.error('Error updating expense:', e);
@@ -305,18 +283,109 @@ async function cleanUploadsDirectory(oldestAgeInMinutes = 120) {
   }
 }
 
+// Normalize G/L codes into ####-### format, allowing for lenient user/AI input
+function normalizeGlCode(glCodeRaw, options = {}) {
+  const { allowFallback = false } = options;
+  
+  if (glCodeRaw === null || glCodeRaw === undefined) {
+    return null;
+  }
+  
+  const rawString = String(glCodeRaw).trim();
+  if (!rawString) {
+    return null;
+  }
+  
+  const explicitMatch = rawString.match(/^(\d{4})-(\d{1,3})$/);
+  if (explicitMatch) {
+    return `${explicitMatch[1]}-${explicitMatch[2].padStart(3, '0')}`;
+  }
+  
+  const digitsOnly = rawString.replace(/\D/g, '');
+  if (digitsOnly.length >= 4) {
+    const mainSegment = digitsOnly.slice(0, 4);
+    let subSegment = digitsOnly.slice(4, 7);
+    
+    if (!subSegment) {
+      subSegment = '000';
+    } else if (subSegment.length < 3) {
+      subSegment = subSegment.padEnd(3, '0');
+    } else if (subSegment.length > 3) {
+      subSegment = subSegment.slice(0, 3);
+    }
+    
+    return `${mainSegment}-${subSegment}`;
+  }
+  
+  if (allowFallback) {
+    return null;
+  }
+  
+  throw new Error(`Invalid G/L code format: ${glCodeRaw}`);
+}
+
+// Infer a reasonable G/L code based on merchant/description keywords
+function inferGlCodeFromText(merchant = '', description = '') {
+  const text = `${merchant || ''} ${description || ''}`.toLowerCase();
+  const includes = (needle) => text.includes(needle);
+  
+  if (includes('office') || includes('staples') || includes('supply') || includes('printer')) {
+    return '6408-000'; // Office & General
+  }
+  
+  if (includes('membership') || includes('association') || includes('dues')) {
+    return '6402-000'; // Membership
+  }
+  
+  if (
+    includes('subscription') || includes('software') || includes('cloud') ||
+    includes('microsoft') || includes('adobe') || includes('zoom')
+  ) {
+    return '6404-000'; // Subscriptions
+  }
+  
+  if (includes('training') || includes('course') || includes('education') || includes('workshop')) {
+    return '7335-000'; // Education & Development
+  }
+  
+  if (
+    includes('parking') || includes('toll') || includes('transit') ||
+    includes('mileage') || includes('km') || includes('etr') || includes('407')
+  ) {
+    return '6026-000'; // Mileage/ETR
+  }
+  
+  if (
+    includes('restaurant') || includes('coffee') || includes('lunch') ||
+    includes('dinner') || includes('meal') || includes('starbucks') ||
+    includes('tim hortons') || includes('cafe')
+  ) {
+    return '6010-000'; // Food & Entertainment
+  }
+  
+  if (includes('social') || includes('event')) {
+    return '6011-000'; // Social
+  }
+  
+  if (
+    includes('hotel') || includes('flight') || includes('airbnb') ||
+    includes('taxi') || includes('uber') || includes('lyft') || includes('travel')
+  ) {
+    return '6012-000'; // Travel
+  }
+  
+  return '6408-000';
+}
+
 // Initialize a new upload session
 async function initUploadSession(req, res, next) {
   try {
     if (!req.sessionId) {
       req.sessionId = uuidv4();
     }
-    if (supabase) {
-      // Create session row if not exists
-      const { error } = await supabase.from('sessions').insert({ id: req.sessionId, status: 'active' });
-      if (error && !/duplicate key/i.test(error.message)) {
-        console.warn('Unable to create session in DB:', error.message);
-      }
+    // Initialize in-memory session uploads list
+    if (!memory.uploadsBySession.has(req.sessionId)) {
+      memory.uploadsBySession.set(req.sessionId, []);
     }
   } catch (e) {
     console.warn('initUploadSession warning:', e.message);
@@ -463,7 +532,7 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                     parsedData = JSON.parse(openaiContent);
                     
                     // Validate required fields
-                    const requiredFields = ['date', 'merchant', 'amount', 'description', 'gl_code'];
+                    const requiredFields = ['date', 'merchant', 'amount', 'description'];
                     const missingFields = requiredFields.filter(field => !parsedData[field]);
                     
                     if (missingFields.length > 0) {
@@ -489,11 +558,16 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                         throw new Error('Invalid date format');
                     }
                     
-                    // Validate G/L code format
-                    const glCodeRegex = /^\d{4}-\d{3}$/;
-                    if (!glCodeRegex.test(parsedData.gl_code)) {
-                        throw new Error('Invalid G/L code format');
+                    // Validate and normalize G/L code format, fallback to inference if needed
+                    let normalizedGlCode = null;
+                    if (parsedData.gl_code) {
+                        normalizedGlCode = normalizeGlCode(parsedData.gl_code, { allowFallback: true });
                     }
+                    if (!normalizedGlCode) {
+                        normalizedGlCode = inferGlCodeFromText(parsedData.merchant, parsedData.description);
+                        console.warn(`Falling back to inferred G/L code ${normalizedGlCode} for ${parsedData.merchant}`);
+                    }
+                    parsedData.gl_code = normalizedGlCode;
                     
                 } catch (parseError) {
                     console.error('Error parsing OpenAI response:', parseError);
@@ -514,36 +588,23 @@ app.post('/api/upload-pdf', initUploadSession, upload.array('pdfFiles', 50), asy
                     parsedData.glCode = parsedData.gl_code;
                 }
                 
-                // Upload PDF to Supabase Storage and track storage path
+                // Track upload path (local filesystem)
                 let storagePath = null;
-                if (supabase) {
-                  const safeOrig = (file.originalname || 'upload.pdf').replace(/[^A-Za-z0-9._-]/g, '_');
-                  const key = `${sessionId}/${uuidv4()}_${safeOrig}`;
-                  const { error: upErr } = await supabase.storage.from('receipts').upload(key, pdfBuffer, {
-                    contentType: 'application/pdf',
-                    upsert: true,
-                  });
-                  if (upErr) {
-                    console.error('Supabase upload error:', upErr);
-                  } else {
-                    storagePath = key;
-                  }
-                }
+                // Keep local file path
+                storagePath = null;
 
                 // Persist upload record (prefer storage path)
-                if (supabase && (storagePath || file.path)) {
-                  const { error: upRecErr } = await supabase.from('uploads').insert({
-                    session_id: sessionId,
-                    storage_path: storagePath || file.path,
-                    original_name: file.originalname || null,
-                    size: file.size || null
-                  });
-                  if (upRecErr) console.error('Error writing upload record:', upRecErr.message);
-                }
+                // Track upload in memory for this session
+                let upRecErr = null;
+                try {
+                  const list = memory.uploadsBySession.get(sessionId) || [];
+                  list.push({ path: file.path, original_name: file.originalname || null, size: file.size || null });
+                  memory.uploadsBySession.set(sessionId, list);
+                } catch (e) { upRecErr = e; }
                 console.log(`PDF file processed: ${storagePath || file.path}`);
 
-                // Remove local file if uploaded to storage
-                if (storagePath) {
+                // Remove local file only if uploaded to storage AND DB row recorded
+                if (storagePath && !upRecErr) {
                   try { await fsPromises.unlink(file.path); } catch (_) {}
                 }
 
@@ -1674,39 +1735,36 @@ app.get('/api/export-pdf', async (req, res) => {
 
         // Fetch upload records for this session
         let filesToMerge = [];
-        if (supabase) {
-            const { data: rows, error } = await supabase
-                .from('uploads')
-                .select('storage_path')
-                .eq('session_id', sessionId);
-            if (error) throw error;
-            filesToMerge = (rows || []).map(r => r.storage_path);
+        // Prefer in-memory tracked files for this session
+        const tracked = memory.uploadsBySession.get(sessionId);
+        if (Array.isArray(tracked) && tracked.length > 0) {
+          filesToMerge = tracked.map(t => t.path).filter(Boolean);
+        }
+        // Also scan the session directory as a safety net
+        const sessionDir = path.join(__dirname, 'uploads', sessionId);
+        try {
+          const sessionEntries = await fsPromises.readdir(sessionDir);
+          for (const entry of sessionEntries) {
+            const entryPath = path.join(sessionDir, entry);
+            try {
+              const stats = await fsPromises.stat(entryPath);
+              if (stats.isFile() && entry.toLowerCase().endsWith('.pdf')) {
+                if (!filesToMerge.includes(entryPath)) filesToMerge.push(entryPath);
+              }
+            } catch (_) {}
+          }
+        } catch (fsErr) {
+          if (fsErr.code !== 'ENOENT') console.error('Error reading local session uploads:', fsErr.message);
         }
 
         if (filesToMerge.length === 0) {
-            return res.status(400).json({ error: 'No PDFs to merge' });
+            return res.status(400).json({ error: 'No PDFs to merge for this session' });
         }
 
         const merger = new PDFMerger();
         const tempFiles = [];
         for (const entry of filesToMerge) {
-            const isStorage = typeof entry === 'string' && !entry.startsWith('/') && !entry.startsWith('uploads');
-            if (isStorage && supabase) {
-                const { data, error } = await supabase.storage.from('receipts').download(entry);
-                if (error) {
-                    console.error('Supabase download error:', error);
-                    continue;
-                }
-                const arrBuf = await data.arrayBuffer();
-                const buf = Buffer.from(arrBuf);
-                const tempPath = path.join(TEMP_DIR, `${sessionId}_${path.basename(entry)}`);
-                await fsPromises.writeFile(tempPath, buf);
-                tempFiles.push(tempPath);
-                await merger.add(tempPath);
-            } else {
-                // Local fallback
-                await merger.add(entry);
-            }
+          await merger.add(entry);
         }
 
         const mergedPdfPath = path.join(TEMP_DIR, `merged_${Date.now()}.pdf`);
@@ -1721,18 +1779,13 @@ app.get('/api/export-pdf', async (req, res) => {
             for (const f of tempFiles) { try { await fsPromises.unlink(f); } catch (_) {} }
         });
 
-        // Cleanup: remove files and rows for this session
-        if (supabase) {
-            const storagePaths = filesToMerge.filter(e => typeof e === 'string' && !e.startsWith('/') && !e.startsWith('uploads'));
-            if (storagePaths.length > 0) {
-                const { error: remErr } = await supabase.storage.from('receipts').remove(storagePaths);
-                if (remErr) console.error('Supabase remove error:', remErr);
-            }
-            const { error: delRowsErr } = await supabase.from('uploads').delete().eq('session_id', sessionId);
-            if (delRowsErr) console.error('Error deleting upload rows:', delRowsErr.message);
-            const { error: updSessErr } = await supabase.from('sessions').update({ status: 'completed' }).eq('id', sessionId);
-            if (updSessErr) console.error('Error updating session status:', updSessErr.message);
+        // Cleanup: remove local session folder and memory state
+        try {
+          await fsPromises.rm(sessionDir, { recursive: true, force: true });
+        } catch (cleanupErr) {
+          console.warn('Error removing local session uploads:', cleanupErr.message);
         }
+        memory.uploadsBySession.delete(sessionId);
 
         // Cleanup: Remove session after processing
         console.log('Completed session:', sessionId);
